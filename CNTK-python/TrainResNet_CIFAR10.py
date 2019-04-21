@@ -105,8 +105,8 @@ def train_and_evaluate(reader_train, reader_test, network_name, epoch_size, max_
 
     # Set learning parameters
     lr_per_sample = []
-    #check_point=[80,120,160,180]
-    check_point = [5, 10, 15, 20]
+    check_point=[80,120,160,180]
+    #check_point = [5, 10, 15, 20]
     lrs=[1e-3,1e-4,1e-5,1e-6,6e-7]
     for i in range(max_epochs+1):
         if i in range(0,check_point[0]):

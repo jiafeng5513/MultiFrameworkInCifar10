@@ -6,6 +6,7 @@ Multi framework test in Cifar-10
 
 #### 环境说明
 1. Windows 10,Anaconda3,python3.6.1,Keras,PyTorch,Tensorflow,CNTK
+2. 使用CNTK时如果提示找不到DLL,请尝试删除java环境变量.
 
 #### 实验结果
 | | | CNTK-python |CNTK-CSharp| Tensorflow |PyTorch |Keras(Tensorflow)|
@@ -22,3 +23,4 @@ Multi framework test in Cifar-10
 | |准确率 | |0.8171| | | |
 |平|时间(s)| |2815.94043| | | |
 |均|准确率 | |0.8259| | | |
+
