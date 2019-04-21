@@ -507,3 +507,4 @@ fabric.properties
 /PyTorch/data/
 /Tensorflow/tmp/
 /CNTK-python/Models/
+/CNTK-python/tfboard_log/
