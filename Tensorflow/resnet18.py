@@ -25,6 +25,8 @@ class Resnet18:
         self.model_name = model_name
         self.lr = lr
         self.resnet50_path = 'weights\\imgnet_resnet18.npz'
+        self.boundaries = [125000, 187500, 250000, 281250]
+        self.learing_rates = [1e-3, 1e-4, 1e-5, 1e-6,5e-7]
 
         # if gpu:
         #     config = tf.ConfigProto()
@@ -145,85 +147,107 @@ class Resnet18:
         # 加载预训练权重
         # self.load_weight()
 
+    def get_Learning_rate(self,step):
+        if step<self.boundaries[0]:
+            return self.learing_rates[0]
+        elif step>=self.boundaries[0] and step<self.boundaries[1]:
+            return self.learing_rates[1]
+        elif step>=self.boundaries[1] and step <self.boundaries[2]:
+            return self.learing_rates[2]
+        elif step>=self.boundaries[2] and step <self.boundaries[3]:
+            return self.learing_rates[3]
+        elif step>=self.boundaries[3] :
+            return self.learing_rates[4]
+
+    def loss(self, logits, labels):
+        '''计算CNN的loss
+        tf.nn.sparse_softmax_cross_entropy_with_logits作用：
+        把softmax计算和cross_entropy_loss计算合在一起'''
+        labels = tf.cast(labels, tf.int64)
+        cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
+            logits=logits, labels=labels, name='cross_entropy_per_example')
+        # tf.reduce_mean对cross entropy计算均值
+        cross_entropy_mean = tf.reduce_mean(cross_entropy,
+                                            name='cross_entropy')
+        # tf.add_to_collection:把cross entropy的loss添加到整体losses的collection中
+        tf.add_to_collection('losses', cross_entropy_mean)
+        # tf.add_n将整体losses的collection中的全部loss求和得到最终的loss
+        return tf.add_n(tf.get_collection('losses'), name='total_loss')
+
     def train(self):
         """
         训练和验证
         :return:
         """
         # 定义网络模型的输入输出和损失
-        batch_size = 32
-        image_holder = tf.placeholder(tf.float32, [batch_size, 24, 24, 3],name="image_in")
-        label_holder = tf.placeholder(tf.int32, [batch_size],name="label_in")
-        is_training = tf.placeholder(tf.bool, name="is_training")
+        with tf.Graph().as_default():
+            batch_size = 32
+            image_holder = tf.placeholder(tf.float32, [batch_size, 24, 24, 3],name="image_in")
+            label_holder = tf.placeholder(tf.int32, [batch_size],name="label_in")
+            is_training = tf.placeholder(tf.bool, name="is_training")
 
-        data_dir="./tmp/cifar10_data/cifar-10-batches-bin"
-        with tf.device('/cpu:0'):
-            images_train, labels_train = cifar10_input.distorted_inputs(data_dir=data_dir,batch_size=batch_size)
-            images_test, labels_test = cifar10_input.inputs(data_dir=data_dir,eval_data=True, batch_size=batch_size)
+            data_dir="./tmp/cifar10_data/cifar-10-batches-bin"
+            with tf.device('/cpu:0'):
+                images_train, labels_train = cifar10_input.distorted_inputs(data_dir=data_dir,batch_size=batch_size)
+                images_test, labels_test = cifar10_input.inputs(data_dir=data_dir,eval_data=True, batch_size=batch_size)
 
-        logits = self.inference(image_holder, is_training)
-        loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=label_holder))
+            logits = self.inference(image_holder, is_training)
+            loss = self.loss(logits=logits, labels=label_holder)
 
-        global_step = tf.Variable(0, trainable=False)
-        # 定义学习率策略
-        boundaries = [80, 120, 160, 180]
-        learing_rates = [1e-3, 1e-4, 1e-5, 1e-6,5e-7]
-        learing_rate = tf.train.piecewise_constant(global_step, boundaries=boundaries, values=learing_rates)
+            config = tf.ConfigProto()
+            config.gpu_options.allow_growth = True
 
-        train_op = tf.train.GradientDescentOptimizer(learing_rate).minimize(loss)  # Or AdamOptimizer
+            with tf.Session(config=config) as sess:
+                self.global_step = 0
+                self.learing_rate = self.get_Learning_rate(self.global_step)
+                train_op = tf.train.AdamOptimizer(self.learing_rate).minimize(loss)  # Or AdamOptimizer
+                top_k_op = tf.nn.in_top_k(logits, label_holder, 1)
 
-
-        top_k_op = tf.nn.in_top_k(logits, label_holder, 1)
-        config = tf.ConfigProto()
-        config.gpu_options.allow_growth = True
-        with tf.Session(config=config) as sess:
-            init = tf.global_variables_initializer()
-            sess.run(init)
-            coord = tf.train.Coordinator()
-            thread = tf.train.start_queue_runners(sess, coord)
-            start = time.clock()
-            """"""
-            print('******Training start********')
-            for step in range(312):
-                start_time = time.time()
-                # training train_step 和 loss 都是由 placeholder 定义的运算，所以这里要用 feed 传入参数
-                image_batch, label_batch = sess.run([images_train, labels_train])
-
-                _, loss_value = sess.run([train_op, loss],
-                                         feed_dict={image_holder: image_batch, label_holder: label_batch,is_training: True})
-                duration = time.time() - start_time
-                if step % 10 == 0:
-                    # 每秒能训练的数量
-                    examples_per_sec = batch_size / duration
-                    # 一个batch数据所花费的时间
-                    sec_per_batch = float(duration)
-
-                    format_str = ('step %d, loss=%.2f (%.1f examples/sec; %.3f sec/batch)')
-                    print(format_str % (step, loss_value, examples_per_sec, sec_per_batch))
-            elapsed = (time.clock() - start)
-            print("Time used (s):", elapsed)
-
-            num_examples = 10000
-            num_iter = int(math.ceil(num_examples / batch_size))
-            true_count = 0
-            total_sample_count = num_iter * batch_size
-            step = 0
-            while step < num_iter:
-                # 获取images-test labels_test的batch
-                image_batch, label_batch = sess.run([images_test, labels_test])
-                # 计算这个batch的top 1上预测正确的样本数
-                preditcions = sess.run([top_k_op], feed_dict={image_holder: image_batch,
-                                                              label_holder: label_batch,
-                                                              is_training: False
-                                                              })
-                # 全部测试样本中预测正确的数量
-                true_count += np.sum(preditcions)
-                step += 1
-            # 准确率
-            precision = true_count / total_sample_count
-            print('precision @ 1 = %.3f' % precision)
-
-            tf.train.write_graph(sess.graph_def, "./model", 'expert-graph.pb', as_text=False)
+                init = tf.global_variables_initializer()
+                sess.run(init)
+                coord = tf.train.Coordinator()
+                thread = tf.train.start_queue_runners(sess, coord)
+                start = time.clock()
+                
+                print('******Training start********')
+                for step in range(312500):
+                    start_time = time.time()
+                    image_batch, label_batch = sess.run([images_train, labels_train])
+                    self.global_step=step
+                    self.learing_rate = self.get_Learning_rate(self.global_step)
+                    _, loss_value = sess.run([train_op, loss],
+                                             feed_dict={image_holder: image_batch, label_holder: label_batch,is_training: True})
+                    duration = time.time() - start_time
+                    if step % 10 == 0:
+                        # 每秒能训练的数量
+                        examples_per_sec = batch_size / duration
+                        # 一个batch数据所花费的时间
+                        sec_per_batch = float(duration)
+                        format_str = ('step %d, loss=%.2f ,learing_rate:%.8f,(%.1f examples/sec; %.3f sec/batch)')
+                        print(format_str % ( self.global_step, loss_value,self.learing_rate, examples_per_sec, sec_per_batch))
+    
+    
+                num_examples = 10000
+                num_iter = int(math.ceil(num_examples / batch_size))
+                true_count = 0
+                total_sample_count = num_iter * batch_size
+                step = 0
+                while step < num_iter:
+                    # 获取images-test labels_test的batch
+                    image_batch_test, label_batch_test = sess.run([images_test, labels_test])
+                    # 计算这个batch的top 5上预测正确的样本数
+                    preditcions = sess.run([top_k_op], feed_dict={image_holder: image_batch_test,
+                                                                  label_holder: label_batch_test,
+                                                                  is_training: False})
+                    # 全部测试样本中预测正确的数量
+                    true_count += np.sum(preditcions)
+                    step += 1
+                # 准确率
+                precision = true_count / total_sample_count
+                print('precision @ 1 = %.3f' % precision)
+                elapsed = (time.clock() - start)
+                print("Time used (s):", elapsed)
+                tf.train.write_graph(sess.graph_def, "./model", 'expert-graph.pb', as_text=False)
         pass
 
     def test(self, img):
