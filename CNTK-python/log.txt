@@ -1,9 +1,0 @@
-log.txt
-CNTKCommandTrainInfo: train : 160
-CNTKCommandTrainInfo: CNTKNoMoreCommands_Total : 160
-CNTKCommandTrainBegin: train
-Learning rate per 1 samples: 0.0078125
-Momentum per minibatch: 0.9
-Finished Epoch[1 of 160]: [Training] loss = 1.585694 * 50000, metric = 58.87% * 50000 41.790s (1196.5 samples/s);
-Finished Epoch[2 of 160]: [Training] loss = 1.091513 * 50000, metric = 38.95% * 50000 14.243s (3510.5 samples/s);
-Finished Epoch[3 of 160]: [Training] loss = 0.877451 * 50000, metric = 30.83% * 50000 13.899s (3597.4 samples/s);

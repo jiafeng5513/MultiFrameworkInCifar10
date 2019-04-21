@@ -502,6 +502,8 @@ fabric.properties
 *.h5
 *.th
 *.pb
+*.dnn
 /CIFAR-10/CIFAR-10_mean.xml
 /PyTorch/data/
 /Tensorflow/tmp/
+/CNTK-python/Models/
