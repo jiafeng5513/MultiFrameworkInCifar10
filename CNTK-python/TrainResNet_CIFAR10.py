@@ -7,7 +7,7 @@ import numpy as np
 from cntk import cross_entropy_with_softmax, classification_error, reduce_mean
 from cntk import Trainer, cntk_py
 from cntk.io import MinibatchSource, ImageDeserializer, StreamDef, StreamDefs
-from cntk.learners import momentum_sgd, learning_parameter_schedule, momentum_schedule
+from cntk.learners import momentum_sgd, learning_parameter_schedule, momentum_schedule,adam
 from cntk.debugging import *
 from cntk.logging import *
 from resnet_models import *
@@ -65,7 +65,7 @@ def train_and_evaluate(reader_train, reader_test, network_name, epoch_size, max_
     :param tensorboard_logdir:
     :param gen_heartbeat:
     :param fp16:
-    :return:
+    :return:准确率,用时
     """
     set_computation_network_trace_level(0)
 
@@ -101,13 +101,13 @@ def train_and_evaluate(reader_train, reader_test, network_name, epoch_size, max_
         pe = C.cast(pe, dtype=np.float32)
 
     # shared training parameters
-    l2_reg_weight = 0.0001
+
 
     # Set learning parameters
     lr_per_sample = []
     check_point=[80,120,160,180]
     #check_point = [5, 10, 15, 20]
-    lrs=[1e-3,1e-4,1e-5,1e-6,6e-7]
+    lrs=[1e-3,1e-4,1e-5,1e-6,5e-7]
     for i in range(max_epochs+1):
         if i in range(0,check_point[0]):
             lr_per_sample.append(lrs[0])
@@ -121,7 +121,7 @@ def train_and_evaluate(reader_train, reader_test, network_name, epoch_size, max_
             lr_per_sample.append(lrs[4])
 
     lr_schedule = learning_parameter_schedule(lr_per_sample, minibatch_size=minibatch_size, epoch_size=epoch_size)
-    mm_schedule = momentum_schedule(0.9, minibatch_size)
+    mm_schedule = momentum_schedule(0.9, minibatch_size)  #动量
 
     # progress writers
     progress_writers = [
@@ -132,8 +132,8 @@ def train_and_evaluate(reader_train, reader_test, network_name, epoch_size, max_
         progress_writers.append(tensorboard_writer)
 
     # trainer object
-    learner = momentum_sgd(z.parameters, lr_schedule, mm_schedule,
-                           l2_regularization_weight=l2_reg_weight)
+    l2_reg_weight = 0.0001
+    learner = adam(z.parameters, lr=lr_schedule, momentum=mm_schedule)
     trainer = Trainer(z, (ce, pe), learner, progress_writers)
 
     # define mapping from reader streams to network inputs
@@ -188,8 +188,7 @@ def train_and_evaluate(reader_train, reader_test, network_name, epoch_size, max_
     trainer.summarize_test_progress()
     print("")
     elapsed = (time.clock() - start)
-    print("Time used (s):", elapsed)
-    return metric_numer / metric_denom
+    return metric_numer / metric_denom, elapsed
 
 
 if __name__ == '__main__':
@@ -209,5 +208,12 @@ if __name__ == '__main__':
                                          os.path.join(data_path, 'CIFAR-10_mean.xml'),
                                          False, total_number_of_samples=C.io.FULL_DATA_SWEEP)
 
-    train_and_evaluate(reader_train, reader_test, network_name, epoch_size, epochs, minibatch_size,
+    accuracy, time = train_and_evaluate(reader_train, reader_test, network_name, epoch_size, epochs, minibatch_size,
                         model_dir, log_dir, tensorboard_logdir, False, False)
+
+    print("error rate=%f,Time used=%f s" % (accuracy, time))
+    i=1
+    while os.path.exists("log_"+str(i)+".txt"):
+        i=i+1
+    output = open("log_"+str(i)+".txt", 'w')
+    output.write("error rate=%f,Time used=%f s" % (accuracy, time))
