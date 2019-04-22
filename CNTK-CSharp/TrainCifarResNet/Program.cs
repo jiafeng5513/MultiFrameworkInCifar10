@@ -64,6 +64,7 @@ namespace TrainCifarResNet
                 var trainingLoss = CNTKLib.CrossEntropyWithSoftmax(classifierOutput, labelsVar, "lossFunction");
                 var prediction = CNTKLib.ClassificationError(classifierOutput, labelsVar, 5, "predictionError");
 
+                //学习率策略
                 double[] lrs = {3e-2, 3e-3, 3e-4, 3e-4, 5e-5};//学习率
                 int[] check_point = {80, 120, 160, 180};//学习率在epoch到达多少时更新
                  uint minibatchSize = 32;
@@ -76,15 +77,20 @@ namespace TrainCifarResNet
                 VectorPairSizeTDouble vp = new VectorPairSizeTDouble() {p1, p2, p3, p4, p5};
                 int sample_num_in_a_epoch = 50000;
                 TrainingParameterScheduleDouble learningRateSchedule = new TrainingParameterScheduleDouble(vp, (uint)sample_num_in_a_epoch);
-                
-                var learningRatePerSample = new TrainingParameterScheduleDouble(0.0078125, 1);
+                //动量
+                var momentum = new TrainingParameterScheduleDouble(0.9, 1);
+                //SGD Learner
+                var sgdLearner = Learner.SGDLearner(classifierOutput.Parameters(), learningRateSchedule);
+                //Adam Learner
+                ParameterVector parameterVector=new ParameterVector();
+                foreach (var parameter in classifierOutput.Parameters())
+                {
+                    parameterVector.Add(parameter);
+                }
+                var adamLearner = CNTKLib.AdamLearner(parameterVector, learningRateSchedule, momentum);
+                //Trainer
+                var trainer = Trainer.CreateTrainer(classifierOutput, trainingLoss, prediction, new List<Learner> { adamLearner });
 
-                var learner = Learner.SGDLearner(classifierOutput.Parameters(), learningRateSchedule);
-                var trainer = Trainer.CreateTrainer(classifierOutput, trainingLoss, prediction,new List<Learner>{learner});
-                //Learner.MomentumSGDLearner(classifierOutput.Parameters(), learningRatePerSample, learningRatePerSample,
-                //    true);
-                //CNTKLib.AdamLearner();
-               
                 int outputFrequencyInMinibatches = 20, miniBatchCount = 0;
                 Stopwatch sw = new Stopwatch();
                 sw.Start();
@@ -104,7 +110,7 @@ namespace TrainCifarResNet
                         { { imageInput, minibatchData[imageStreamInfo] },
                           { labelsVar,  minibatchData[labelStreamInfo] } }, device);
                     
-                    TestHelper.PrintTrainingProgress(trainer, learner,miniBatchCount++, outputFrequencyInMinibatches);
+                    TestHelper.PrintTrainingProgress(trainer, sgdLearner,miniBatchCount++, outputFrequencyInMinibatches);
                 }
 
                 // save the model
@@ -113,20 +119,31 @@ namespace TrainCifarResNet
                 Console.WriteLine("*****************Train Stop*****************");
 
                 // validate the model
-                ValidateModel(device, modelFile);
+                float errorRate = ValidateModel(device, modelFile);
                 sw.Stop();
                 TimeSpan ts2 = sw.Elapsed;
 
                 Console.WriteLine("*****************Validate Stop*****************");
-                Console.WriteLine("Total time :{0}s.", ts2.TotalSeconds);
+                string logstr = "Total time :" + ts2.TotalSeconds + "s.Error rate:" + errorRate;
+                Console.WriteLine(logstr);
+
+                int i = 1;
+                while (System.IO.File.Exists("../../../../log_"+i.ToString()+".txt"))
+                {
+                    i++;
+                }
+
+                var file = System.IO.File.Create("../../../../log_" + i.ToString() + ".txt");
+                byte[] data = System.Text.Encoding.Default.GetBytes(logstr);
+                file.Write(data, 0, data.Length);
             }
 
-            private static void ValidateModel(DeviceDescriptor device, string modelFile)
+            private static float ValidateModel(DeviceDescriptor device, string modelFile)
             {
                 MinibatchSource testMinibatchSource = CreateMinibatchSource(
                     Path.Combine(CifarDataFolder, "test_map.txt"),
                     Path.Combine(CifarDataFolder, "CIFAR-10_mean.xml"), imageDim, numClasses, 1);
-                TestHelper.ValidateModelWithMinibatchSource(modelFile, testMinibatchSource,
+                return TestHelper.ValidateModelWithMinibatchSource(modelFile, testMinibatchSource,
                     imageDim, numClasses, "features", "labels", "classifierOutput", device);
             }
 
