@@ -1,1 +1,0 @@
-error rate=0.102700,Time used=2444.089096 s

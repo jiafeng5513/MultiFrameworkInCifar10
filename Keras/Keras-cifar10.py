@@ -230,3 +230,9 @@ print('Test loss:', scores[0])
 print('Test accuracy:', scores[1])
 elapsed = (time.clock() - start)
 print("Time used (s):",elapsed)
+
+i=1
+while os.path.exists("log_"+str(i)+".txt"):
+    i=i+1
+output = open("log_"+str(i)+".txt", 'w')
+output.write("Test loss:=%f,Test accuracy=%f,Time used (s):" % (scores[0],scores[1], elapsed))
