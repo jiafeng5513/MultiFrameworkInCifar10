@@ -163,14 +163,14 @@ namespace CommonHelper
             return minibatchValues.Any(a => a.sweepEnd);
         }
 
-        public static void PrintTrainingProgress(Trainer trainer, int minibatchIdx, int outputFrequencyInMinibatches)
+        public static void PrintTrainingProgress(Trainer trainer, Learner learner,int minibatchIdx, int outputFrequencyInMinibatches)
         {
             if ((minibatchIdx % outputFrequencyInMinibatches) == 0 && trainer.PreviousMinibatchSampleCount() != 0)
             {
                 float trainLossValue = (float)trainer.PreviousMinibatchLossAverage();
                 float evaluationValue = (float)trainer.PreviousMinibatchEvaluationAverage();
                 
-                Console.WriteLine($"Minibatch: {minibatchIdx} CrossEntropyLoss = {trainLossValue}, EvaluationCriterion = {evaluationValue}");
+                Console.WriteLine($"Minibatch: {minibatchIdx} LearningRate: {learner.LearningRate()} CrossEntropyLoss = {trainLossValue}, EvaluationCriterion = {evaluationValue}");
             }
         }
 

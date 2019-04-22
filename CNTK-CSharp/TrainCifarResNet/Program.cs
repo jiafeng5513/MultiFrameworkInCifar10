@@ -64,34 +64,27 @@ namespace TrainCifarResNet
                 var trainingLoss = CNTKLib.CrossEntropyWithSoftmax(classifierOutput, labelsVar, "lossFunction");
                 var prediction = CNTKLib.ClassificationError(classifierOutput, labelsVar, 5, "predictionError");
 
-                VectorPairSizeTDouble vpt=new VectorPairSizeTDouble();
-                for (int i = 0; i < MaxEpochs; i++)
-                {
-                    double lr = 1e-3;
-                    if (i>80)
-                    {
-                        lr *= 1e-1;
-                    }else if (i>120)
-                    {
-                        lr *= 1e-2;
-                    }else if (i>160)
-                    {
-                        lr *= 1e-3;
-                    }else if (i>180)
-                    {
-                        lr *= 0.5e-3;
-                    }
-                    PairSizeTDouble pt=new PairSizeTDouble();
-                    pt.first = 1;
-                    pt.second = lr;
-                    vpt.Add(pt);
-                }
+                double[] lrs = {3e-2, 3e-3, 3e-4, 3e-4, 5e-5};//学习率
+                int[] check_point = {80, 120, 160, 180};//学习率在epoch到达多少时更新
+                 uint minibatchSize = 32;
+                PairSizeTDouble p1 = new PairSizeTDouble(80, lrs[0]);
+                PairSizeTDouble p2 = new PairSizeTDouble(40, lrs[1]);
+                PairSizeTDouble p3 = new PairSizeTDouble(40, lrs[2]);
+                PairSizeTDouble p4 = new PairSizeTDouble(20, lrs[3]);
+                PairSizeTDouble p5 = new PairSizeTDouble(20, lrs[4]);
+
+                VectorPairSizeTDouble vp = new VectorPairSizeTDouble() {p1, p2, p3, p4, p5};
+                int sample_num_in_a_epoch = 50000;
+                TrainingParameterScheduleDouble learningRateSchedule = new TrainingParameterScheduleDouble(vp, (uint)sample_num_in_a_epoch);
                 
                 var learningRatePerSample = new TrainingParameterScheduleDouble(0.0078125, 1);
-                var trainer = Trainer.CreateTrainer(classifierOutput, trainingLoss, prediction,
-                    new List<Learner> { Learner.SGDLearner(classifierOutput.Parameters(), learningRatePerSample) });
 
-                uint minibatchSize = 32;
+                var learner = Learner.SGDLearner(classifierOutput.Parameters(), learningRateSchedule);
+                var trainer = Trainer.CreateTrainer(classifierOutput, trainingLoss, prediction,new List<Learner>{learner});
+                //Learner.MomentumSGDLearner(classifierOutput.Parameters(), learningRatePerSample, learningRatePerSample,
+                //    true);
+                //CNTKLib.AdamLearner();
+               
                 int outputFrequencyInMinibatches = 20, miniBatchCount = 0;
                 Stopwatch sw = new Stopwatch();
                 sw.Start();
@@ -108,9 +101,10 @@ namespace TrainCifarResNet
                     }
 
                     trainer.TrainMinibatch(new Dictionary<Variable, MinibatchData>()
-                        { { imageInput, minibatchData[imageStreamInfo] }, { labelsVar, minibatchData[labelStreamInfo] } }, device);
+                        { { imageInput, minibatchData[imageStreamInfo] },
+                          { labelsVar,  minibatchData[labelStreamInfo] } }, device);
                     
-                    TestHelper.PrintTrainingProgress(trainer, miniBatchCount++, outputFrequencyInMinibatches);
+                    TestHelper.PrintTrainingProgress(trainer, learner,miniBatchCount++, outputFrequencyInMinibatches);
                 }
 
                 // save the model

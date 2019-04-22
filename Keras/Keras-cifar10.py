@@ -53,6 +53,9 @@ y_train = keras.utils.to_categorical(y_train, num_classes)
 y_test = keras.utils.to_categorical(y_test, num_classes)
 
 
+check_point=[80,120,160,180]
+lrs=[3e-2,3e-3,3e-4,3e-4,5e-5]
+
 
 def lr_schedule(epoch):
     """学习率
@@ -66,15 +69,16 @@ def lr_schedule(epoch):
     # Returns
         lr (float32): learning rate
     """
-    lr = 1e-3
-    if epoch > 180:
-        lr *= 0.5e-3
-    elif epoch > 160:
-        lr *= 1e-3
-    elif epoch > 120:
-        lr *= 1e-2
-    elif epoch > 80:
-        lr *= 1e-1
+    if epoch in range(0,check_point[0]):
+        lr=(lrs[0])
+    if epoch in range(check_point[0], check_point[1]):
+        lr=(lrs[1])
+    if epoch in range(check_point[1], check_point[2]):
+        lr=(lrs[2])
+    if epoch in range(check_point[2], check_point[3]):
+        lr=(lrs[3])
+    if epoch>check_point[3]:
+        lr=(lrs[4])
     print('Learning rate: ', lr)
     return lr
 
