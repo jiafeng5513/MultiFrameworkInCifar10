@@ -107,7 +107,7 @@ def train_and_evaluate(reader_train, reader_test, network_name, epoch_size, max_
     lr_per_sample = []
     check_point=[80,120,160,180]
     #check_point = [5, 10, 15, 20]
-    lrs=[1e-3,1e-4,1e-5,1e-6,5e-7]
+    lrs=[3e-2,3e-3,3e-4,3e-4,5e-5]
     for i in range(max_epochs+1):
         if i in range(0,check_point[0]):
             lr_per_sample.append(lrs[0])
@@ -133,7 +133,8 @@ def train_and_evaluate(reader_train, reader_test, network_name, epoch_size, max_
 
     # trainer object
     l2_reg_weight = 0.0001
-    learner = adam(z.parameters, lr=lr_schedule, momentum=mm_schedule)
+    learner = momentum_sgd(z.parameters, lr_schedule, mm_schedule,
+                           l2_regularization_weight=l2_reg_weight)
     trainer = Trainer(z, (ce, pe), learner, progress_writers)
 
     # define mapping from reader streams to network inputs
