@@ -194,13 +194,6 @@ def resnet_v1(input_shape, depth, num_classes=10):
     model = Model(inputs=inputs, outputs=outputs)
     return model
 
-
-i=lr_schedule(0)
-i=lr_schedule(80)
-i=lr_schedule(180)
-i=lr_schedule(181)
-
-
 '''训练和测试开始'''
 model = resnet_v1(input_shape=input_shape, depth=depth)
 model.compile(loss='categorical_crossentropy', optimizer=Adam(lr=lr_schedule(0)), metrics=['accuracy'])
