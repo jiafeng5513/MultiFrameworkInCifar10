@@ -6,6 +6,7 @@ from keras.optimizers import Adam
 from keras.callbacks import ModelCheckpoint, LearningRateScheduler
 from keras.callbacks import ReduceLROnPlateau
 from keras.preprocessing.image import ImageDataGenerator
+from keras.utils.training_utils import multi_gpu_model
 from keras.regularizers import l2
 from keras import backend as K
 from keras.models import Model
@@ -199,7 +200,8 @@ def resnet_v1(input_shape, depth, num_classes=10):
     return model
 
 '''训练和测试开始'''
-model = resnet_v1(input_shape=input_shape, depth=depth)
+pmodel = resnet_v1(input_shape=input_shape, depth=depth)
+model = multi_gpu_model(pmodel, gpus=4)
 model.compile(loss='categorical_crossentropy', optimizer=Adam(), metrics=['accuracy'])
 model.summary()
 print(model_type)
