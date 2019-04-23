@@ -77,8 +77,8 @@ def lr_schedule(epoch):
         lr=(lrs[2])
     if epoch in range(check_point[2], check_point[3]):
         lr=(lrs[3])
-    if epoch>check_point[3]:
-        lr=(lrs[4])
+    if epoch >= check_point[3]:
+        lr = (lrs[4])
     print('Learning rate: ', lr)
     return lr
 
@@ -195,6 +195,12 @@ def resnet_v1(input_shape, depth, num_classes=10):
     return model
 
 
+i=lr_schedule(0)
+i=lr_schedule(80)
+i=lr_schedule(180)
+i=lr_schedule(181)
+
+
 '''训练和测试开始'''
 model = resnet_v1(input_shape=input_shape, depth=depth)
 model.compile(loss='categorical_crossentropy', optimizer=Adam(lr=lr_schedule(0)), metrics=['accuracy'])
@@ -235,4 +241,4 @@ i=1
 while os.path.exists("log_"+str(i)+".txt"):
     i=i+1
 output = open("log_"+str(i)+".txt", 'w')
-output.write("Test loss:=%f,Test accuracy=%f,Time used (s):" % (scores[0],scores[1], elapsed))
+output.write("Test loss:=%f,Test accuracy=%f,Time used %f s" % (scores[0],scores[1], elapsed))
