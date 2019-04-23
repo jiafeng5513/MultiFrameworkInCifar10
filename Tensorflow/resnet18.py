@@ -6,6 +6,7 @@ import cv2
 import cifar10_input
 import time
 import math
+import os
 from datetime import datetime
 
 
@@ -342,4 +343,5 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1,2,3"
     tf.app.run()
