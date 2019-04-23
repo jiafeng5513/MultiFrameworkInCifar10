@@ -28,12 +28,12 @@ class Resnet18:
         self.number_train_samples = number_train_samples
         self.number_test_samples = number_test_samples
         self.checkpointdir = checkpointdir
-        self.max_step = self.number_train_samples * self.epochs
+        self.max_step = int(self.number_train_samples/self.batch_size * self.epochs)
         self.MOVING_AVERAGE_DECAY = 0.9999  # The decay to use for the moving average.
 
     # 定义卷积
     def Convolution(self, input_, output_dim, kernel_height=1, kernel_width=1,
-                    stride_height=1, stride_width=1, with_blas=False, name="w"):
+                    stride_height=1, stride_width=1, with_blas=False, name="w", padding="SAME"):
         """
         :param input_:       输入变量
         :param output_dim:   输出维数
@@ -51,10 +51,10 @@ class Resnet18:
         w = tf.get_variable(name, [kernel_height, kernel_width, input_.get_shape()[-1], output_dim],
                             initializer=tf.truncated_normal_initializer(stddev=stddev))
         # 卷积
-        conv = tf.nn.conv2d(input_, w, strides=[1, stride_height, stride_width, 1], padding="SAME")
+        conv = tf.nn.conv2d(input_, w, strides=[1, stride_height, stride_width, 1], padding=padding)
         # blas
         if with_blas:
-            bias = tf.get_variable([output_dim], initializer=tf.constant_initializer(0.0))
+            bias = tf.get_variable("b",[output_dim], initializer=tf.constant_initializer(0.0))
             return tf.nn.bias_add(conv, bias)
         else:
             return conv
@@ -94,7 +94,7 @@ class Resnet18:
         return tf.nn.relu(plus)
 
     # 定义Residual Block V2
-    def ResidualBlockV2(self, input, output_dim, is_training=True, kernel_height=3, kernel_width=3, strides=1, name="res"):
+    def ResidualBlockV2(self, input, output_dim1, is_training=True, kernel_height=3, kernel_width=3, strides=1, name="res"):
         """
         Residual Block V2,一路上是两个串联的卷积核BN,另一路是一个卷积和BN
         :param input:           输入
@@ -107,14 +107,14 @@ class Resnet18:
         :return:
         """
         with tf.variable_scope(name+"_A"):
-            c1 = self.Convolution(input, output_dim, kernel_height, kernel_width, strides, strides, name=name+"_A")
+            c1 = self.Convolution(input, output_dim1, 3, 3, 2, 2, name=name+"_A")
             bn1 = self.BatchNormalization(c1, is_training)
             r1 = tf.nn.relu(bn1)
         with tf.variable_scope(name+"_B"):
-            c2 = self.Convolution(r1, output_dim, kernel_height, kernel_width, strides, strides, name=name+"_B")
+            c2 = self.Convolution(r1, output_dim1, 3, 3, 1, 1, name=name+"_B")
             bn2 = self.BatchNormalization(c2, is_training)
         with tf.variable_scope(name+"_C"):
-            c3 = self.Convolution(input, output_dim, kernel_height, kernel_width, strides, strides, name=name+"_C")
+            c3 = self.Convolution(input, output_dim1, 1, 1, 2, 2, name=name+"_C", padding="VALID")
             bn3 = self.BatchNormalization(c3, is_training)
             plus = tf.add_n([bn3, bn2])
 
@@ -325,12 +325,16 @@ class Resnet18:
 def main(argv=None):
     datadir="./tmp/cifar10_data/cifar-10-batches-bin"
     checkpointdir= "./checkpoints/"
-    boundaries = [125000, 187500, 250000, 281250]
-    learing_rates = [3e-2, 3e-3, 3e-4, 3e-4, 5e-5]
     batch_size = 32
     epochs = 200
     number_train_samples = 50000
     number_test_samples = 10000
+    # 一个step是一个batch
+    # 80epoch =80* 50000/32
+    boundaries_epoch=[80, 120, 160, 180]
+    boundaries = [item * int(50000/32) for item in boundaries_epoch]
+    learing_rates = [3e-2, 3e-3, 3e-4, 3e-4, 5e-5]
+
 
     model = Resnet18(datadir, boundaries, learing_rates, batch_size, epochs,
                      number_train_samples, number_test_samples, checkpointdir)
@@ -344,5 +348,5 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    os.environ["CUDA_VISIBLE_DEVICES"] = "1,2,3"
+    #os.environ["CUDA_VISIBLE_DEVICES"] = "1,2,3"
     tf.app.run()

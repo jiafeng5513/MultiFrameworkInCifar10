@@ -53,29 +53,15 @@ print('y_train shape:', y_train.shape)
 y_train = keras.utils.to_categorical(y_train, num_classes)
 y_test = keras.utils.to_categorical(y_test, num_classes)
 
-
-check_point=[80,120,160,180]
-lrs=[3e-2,3e-3,3e-4,3e-4,5e-5]
+check_point = [80, 120, 160, 180]
+lrs = [3e-2, 3e-3, 3e-4, 3e-4, 5e-5]
 
 
 def lr_schedule(epoch):
-    """学习率
-
-    Learning rate is scheduled to be reduced after 80, 120, 160, 180 epochs.
-    Called automatically every epoch as part of callbacks during training.
-
-    # Arguments
-        epoch (int): The number of epochs
-
-    # Returns
-        lr (float32): learning rate
-        lr = K.get_value(model.optimizer.lr)
-        K.set_value(model.optimizer.lr, lr * 0.1)
-        print("lr changed to {}".format(lr * 0.1))
-    return K.get_value(model.optimizer.lr)
-
     """
-    if epoch in range(0,check_point[0]):
+    学习率
+    """
+    if epoch in range(0, check_point[0]):
         K.set_value(model.optimizer.lr, lrs[0])
     if epoch in range(check_point[0], check_point[1]):
         K.set_value(model.optimizer.lr, lrs[1])
@@ -85,7 +71,27 @@ def lr_schedule(epoch):
         K.set_value(model.optimizer.lr, lrs[3])
     if epoch >= check_point[3]:
         K.set_value(model.optimizer.lr, lrs[4])
+    print("learning rate = %f" % K.get_value(model.optimizer.lr))
     return K.get_value(model.optimizer.lr)
+
+def ResBlock_v1(input,num_filters,kernel_size=3, strides=1):
+    conv1 = Conv2D(filters=num_filters, kernel_size=kernel_size, strides=strides, padding='same')(input)
+    bn1=BatchNormalization()(conv1)
+    r1=Activation('relu')(bn1)
+    conv2 = Conv2D(filters=num_filters, kernel_size=kernel_size, strides=strides, padding='same')(r1)
+    bn2=BatchNormalization()(conv2)
+    out=keras.layers.add([input, bn2])
+    return out
+
+def ResBlock_v2(input,num_filters,kernel_size=3, strides=1):
+    conv1 = Conv2D(filters=num_filters, kernel_size=kernel_size, strides=strides, padding='same')(input)
+    bn1=BatchNormalization()(conv1)
+    r1=Activation('relu')(bn1)
+    conv2 = Conv2D(filters=num_filters, kernel_size=kernel_size, strides=strides, padding='same')(r1)
+    bn2=BatchNormalization()(conv2)
+
+    conv3= Conv2D(filters=num_filters, kernel_size=1, strides=strides, padding='same')(r1)
+    pass
 
 def resnet_layer(inputs, num_filters=16, kernel_size=3, strides=1,
                  activation='relu', batch_normalization=True, conv_first=True):
@@ -104,12 +110,7 @@ def resnet_layer(inputs, num_filters=16, kernel_size=3, strides=1,
     # Returns
         x (tensor): tensor as input to the next layer
     """
-    conv = Conv2D(num_filters,
-                  kernel_size=kernel_size,
-                  strides=strides,
-                  padding='same',
-                  kernel_initializer='he_normal',
-                  kernel_regularizer=l2(1e-4))
+    conv = Conv2D(filters=num_filters, kernel_size=kernel_size, strides=strides, padding='same')
 
     x = inputs
     if conv_first:
@@ -125,6 +126,7 @@ def resnet_layer(inputs, num_filters=16, kernel_size=3, strides=1,
             x = Activation(activation)(x)
         x = conv(x)
     return x
+
 
 def resnet_v1(input_shape, depth, num_classes=10):
     """ResNet Version 1 Model builder [a]
@@ -168,21 +170,13 @@ def resnet_v1(input_shape, depth, num_classes=10):
             strides = 1
             if stack > 0 and res_block == 0:  # first layer but not first stack
                 strides = 2  # downsample
-            y = resnet_layer(inputs=x,
-                             num_filters=num_filters,
-                             strides=strides)
-            y = resnet_layer(inputs=y,
-                             num_filters=num_filters,
-                             activation=None)
+            y = resnet_layer(inputs=x, num_filters=num_filters, strides=strides)
+            y = resnet_layer(inputs=y, num_filters=num_filters, activation=None)
             if stack > 0 and res_block == 0:  # first layer but not first stack
                 # linear projection residual shortcut connection to match
                 # changed dims
-                x = resnet_layer(inputs=x,
-                                 num_filters=num_filters,
-                                 kernel_size=1,
-                                 strides=strides,
-                                 activation=None,
-                                 batch_normalization=True)
+                x = resnet_layer(inputs=x,num_filters=num_filters,kernel_size=1,
+                                 strides=strides,activation=None,batch_normalization=True)
             x = keras.layers.add([x, y])
             x = Activation('relu')(x)
         num_filters *= 2
@@ -199,9 +193,10 @@ def resnet_v1(input_shape, depth, num_classes=10):
     model = Model(inputs=inputs, outputs=outputs)
     return model
 
+
 '''训练和测试开始'''
 model = resnet_v1(input_shape=input_shape, depth=depth)
-#model = multi_gpu_model(pmodel, gpus=4)
+# model = multi_gpu_model(pmodel, gpus=4)
 model.compile(loss='categorical_crossentropy', optimizer=Adam(), metrics=['accuracy'])
 model.summary()
 print(model_type)
@@ -220,7 +215,7 @@ change_lr = LearningRateScheduler(lr_schedule)
 start = time.clock()
 """"""
 print('******Training start********')
-model.fit(x=x_train, y=y_train, batch_size=batch_size, epochs=epochs, verbose=1,validation_data=(x_test, y_test),
+model.fit(x=x_train, y=y_train, batch_size=batch_size, epochs=epochs, verbose=1, validation_data=(x_test, y_test),
           shuffle=True, callbacks=[checkpoint, change_lr])
 
 # Score trained model.
@@ -228,10 +223,10 @@ scores = model.evaluate(x_test, y_test, verbose=1)
 print('Test loss:', scores[0])
 print('Test accuracy:', scores[1])
 elapsed = (time.clock() - start)
-print("Time used (s):",elapsed)
+print("Time used (s):", elapsed)
 
-i=1
-while os.path.exists("log_"+str(i)+".txt"):
-    i=i+1
-output = open("log_"+str(i)+".txt", 'w')
-output.write("Test loss:=%f,Test accuracy=%f,Time used %f s" % (scores[0],scores[1], elapsed))
+i = 1
+while os.path.exists("log_" + str(i) + ".txt"):
+    i = i + 1
+output = open("log_" + str(i) + ".txt", 'w')
+output.write("Test loss:=%f,Test accuracy=%f,Time used %f s" % (scores[0], scores[1], elapsed))
