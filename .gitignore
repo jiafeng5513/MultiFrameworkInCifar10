@@ -508,3 +508,4 @@ fabric.properties
 /Tensorflow/tmp/
 /CNTK-python/Models/
 /CNTK-python/tfboard_log/
+/Tensorflow/checkpoints/

@@ -68,19 +68,23 @@ def lr_schedule(epoch):
 
     # Returns
         lr (float32): learning rate
+        lr = K.get_value(model.optimizer.lr)
+        K.set_value(model.optimizer.lr, lr * 0.1)
+        print("lr changed to {}".format(lr * 0.1))
+    return K.get_value(model.optimizer.lr)
+
     """
     if epoch in range(0,check_point[0]):
-        lr=(lrs[0])
+        K.set_value(model.optimizer.lr, lrs[0])
     if epoch in range(check_point[0], check_point[1]):
-        lr=(lrs[1])
+        K.set_value(model.optimizer.lr, lrs[1])
     if epoch in range(check_point[1], check_point[2]):
-        lr=(lrs[2])
+        K.set_value(model.optimizer.lr, lrs[2])
     if epoch in range(check_point[2], check_point[3]):
-        lr=(lrs[3])
+        K.set_value(model.optimizer.lr, lrs[3])
     if epoch >= check_point[3]:
-        lr = (lrs[4])
-    print('Learning rate: ', lr)
-    return lr
+        K.set_value(model.optimizer.lr, lrs[4])
+    return K.get_value(model.optimizer.lr)
 
 def resnet_layer(inputs, num_filters=16, kernel_size=3, strides=1,
                  activation='relu', batch_normalization=True, conv_first=True):
@@ -196,7 +200,7 @@ def resnet_v1(input_shape, depth, num_classes=10):
 
 '''训练和测试开始'''
 model = resnet_v1(input_shape=input_shape, depth=depth)
-model.compile(loss='categorical_crossentropy', optimizer=Adam(lr=lr_schedule(0)), metrics=['accuracy'])
+model.compile(loss='categorical_crossentropy', optimizer=Adam(), metrics=['accuracy'])
 model.summary()
 print(model_type)
 
@@ -208,20 +212,14 @@ if not os.path.isdir(save_dir):
 filepath = os.path.join(save_dir, model_name)
 
 # Prepare callbacks for model saving and for learning rate adjustment.
-checkpoint = ModelCheckpoint(filepath=filepath, monitor='val_acc', verbose=1, save_best_only=True)
-
-lr_scheduler = LearningRateScheduler(lr_schedule)
-
-lr_reducer = ReduceLROnPlateau(factor=np.sqrt(0.1), cooldown=0, patience=5, min_lr=0.5e-6)
-
-callbacks = [checkpoint, lr_reducer, lr_scheduler]
-
+checkpoint = ModelCheckpoint(filepath=filepath, monitor='val_acc', verbose=1, save_best_only=True, period=50)
+change_lr = LearningRateScheduler(lr_schedule)
 # Run training
 start = time.clock()
 """"""
 print('******Training start********')
-model.fit(x=x_train, y=y_train, batch_size=batch_size, epochs=epochs, verbose=1,validation_data=(x_test, y_test), shuffle=True,
-          callbacks=callbacks)
+model.fit(x=x_train, y=y_train, batch_size=batch_size, epochs=epochs, verbose=1,validation_data=(x_test, y_test),
+          shuffle=True, callbacks=[change_lr])
 
 # Score trained model.
 scores = model.evaluate(x_test, y_test, verbose=1)
