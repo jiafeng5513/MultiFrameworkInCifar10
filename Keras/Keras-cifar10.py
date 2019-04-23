@@ -200,8 +200,8 @@ def resnet_v1(input_shape, depth, num_classes=10):
     return model
 
 '''训练和测试开始'''
-pmodel = resnet_v1(input_shape=input_shape, depth=depth)
-model = multi_gpu_model(pmodel, gpus=4)
+model = resnet_v1(input_shape=input_shape, depth=depth)
+#model = multi_gpu_model(pmodel, gpus=4)
 model.compile(loss='categorical_crossentropy', optimizer=Adam(), metrics=['accuracy'])
 model.summary()
 print(model_type)
@@ -214,14 +214,14 @@ if not os.path.isdir(save_dir):
 filepath = os.path.join(save_dir, model_name)
 
 # Prepare callbacks for model saving and for learning rate adjustment.
-checkpoint = ModelCheckpoint(filepath=filepath, monitor='val_acc', verbose=1, save_best_only=True, period=50)
+checkpoint = ModelCheckpoint(filepath=filepath, monitor='val_acc', verbose=1, save_best_only=True)
 change_lr = LearningRateScheduler(lr_schedule)
 # Run training
 start = time.clock()
 """"""
 print('******Training start********')
 model.fit(x=x_train, y=y_train, batch_size=batch_size, epochs=epochs, verbose=1,validation_data=(x_test, y_test),
-          shuffle=True, callbacks=[change_lr])
+          shuffle=True, callbacks=[checkpoint, change_lr])
 
 # Score trained model.
 scores = model.evaluate(x_test, y_test, verbose=1)
