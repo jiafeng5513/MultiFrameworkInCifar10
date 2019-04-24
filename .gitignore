@@ -509,3 +509,8 @@ fabric.properties
 /CNTK-python/Models/
 /CNTK-python/tfboard_log/
 /Tensorflow/checkpoints/
+/CIFAR-10/cifar-10-batches-bin/
+/CIFAR-10/cifar-10-binary.tar.gz
+/Keras/saved_models/
+/tensorflow-examples-cifar10/cifar10_eval/
+/tensorflow-examples-cifar10/cifar10_train/
