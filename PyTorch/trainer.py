@@ -22,15 +22,15 @@ parser = argparse.ArgumentParser(description='Propert ResNets for CIFAR10 in pyt
 parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet20',
                     choices=model_names,
                     help='model architecture: ' + ' | '.join(model_names) +
-                    ' (default: resnet32)')
+                    ' (default: resnet20)')
 parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
-parser.add_argument('--epochs', default=1, type=int, metavar='N',
+parser.add_argument('--epochs', default=200, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
 parser.add_argument('-b', '--batch-size', default=32, type=int,
-                    metavar='N', help='mini-batch size (default: 128)')
+                    metavar='N', help='mini-batch size (default: 32)')
 parser.add_argument('--lr', '--learning-rate', default=0.03, type=float,
                     metavar='LR', help='initial learning rate')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
@@ -65,7 +65,7 @@ def main():
     if not os.path.exists(args.save_dir):
         os.makedirs(args.save_dir)
 
-    model = torch.nn.DataParallel(resnet.__dict__[args.arch]())
+    model = resnet.__dict__[args.arch]()
     model.cuda()
 
     # optionally resume from a checkpoint
@@ -87,7 +87,7 @@ def main():
                                      std=[0.229, 0.224, 0.225])
 
     train_loader = torch.utils.data.DataLoader(
-        datasets.CIFAR10(root='./data', train=True, transform=transforms.Compose([
+        datasets.CIFAR10(root='../CIFAR-10/', train=True, transform=transforms.Compose([
             transforms.RandomHorizontalFlip(),
             transforms.RandomCrop(32, 4),
             transforms.ToTensor(),
@@ -95,7 +95,7 @@ def main():
         ]), download=True),
         batch_size=args.batch_size, shuffle=True,
         num_workers=args.workers, pin_memory=True)
-    input_var = list(enumerate(train_loader))[0][1][0]
+    #input_var = list(enumerate(train_loader))[0][1][0]
     val_loader = torch.utils.data.DataLoader(
         datasets.CIFAR10(root='./data', train=False, transform=transforms.Compose([
             transforms.ToTensor(),
@@ -118,17 +118,13 @@ def main():
     lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
                                                         milestones=[80, 120,160,180], gamma=0.1,last_epoch=args.start_epoch - 1)
 
-    if args.arch in ['resnet1202', 'resnet110']:
-        # for resnet1202 original paper uses lr=0.01 for first 400 minibatches for warm-up
-        # then switch back. In this implementation it will correspond for first epoch.
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = args.lr*0.1
+
 
     if args.evaluate:
         validate(val_loader, model, criterion)
         return
     # Run training
-    start = time.clock()
+    point1=point2=start = time.clock()
     for epoch in range(args.start_epoch, args.epochs):
 
         # train for one epoch
@@ -136,6 +132,7 @@ def main():
         train(train_loader, model, criterion, optimizer, epoch)
         lr_scheduler.step()
         # evaluate on validation set
+        point1=time.clock()
         prec1 = validate(val_loader, model, criterion)
 
         # remember best prec@1 and save checkpoint
@@ -148,14 +145,14 @@ def main():
                 'state_dict': model.state_dict(),
                 'best_prec1': best_prec1,
             }, is_best, filename=os.path.join(args.save_dir, 'checkpoint.th'))
-    elapsed = (time.clock() - start)
+        point2=time.clock()
+    elapsed = (time.clock() - start)-(point2-point1)
     save_checkpoint({
         'state_dict': model.state_dict(),
         'best_prec1': best_prec1,
     }, is_best, filename=os.path.join(args.save_dir, 'model.th'))
-    #input_data = Variable(torch.randn(32, 3, 32, 32)).cuda()
-    #input_vars = list(enumerate(train_loader))
-    torch.onnx.export(model, input_var, "ResNet.onnx", export_params=True, verbose=True, training=False)
+    input_data = Variable(torch.randn(32, 3, 32, 32)).cuda()
+    torch.onnx.export(model, input_data, "ResNet.onnx", export_params=True, verbose=True, training=False)
 
     print("Time used (s):", elapsed)
     i = 1

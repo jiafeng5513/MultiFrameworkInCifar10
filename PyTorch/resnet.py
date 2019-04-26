@@ -11,11 +11,6 @@ number of layers and parameters:
 
 name      | layers | params
 ResNet20  |    20  | 0.27M
-ResNet32  |    32  | 0.46M
-ResNet44  |    44  | 0.66M
-ResNet56  |    56  | 0.85M
-ResNet110 |   110  |  1.7M
-ResNet1202|  1202  | 19.4m
 
 which this implementation indeed has.
 
@@ -34,7 +29,7 @@ import torch.nn.init as init
 
 from torch.autograd import Variable
 
-__all__ = ['ResNet', 'resnet20', 'resnet32', 'resnet44', 'resnet56', 'resnet110', 'resnet1202']
+__all__ = ['ResNet', 'resnet20']
 
 def _weights_init(m):
     classname = m.__class__.__name__
@@ -91,10 +86,10 @@ class ResNet(nn.Module):
         self.conv1 = nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(16)
         self.layer1 = self._make_layer(block, 16, num_blocks[0], stride=1, option='A')  # 3
-        self.layer2 = self._make_layer(block, 32, num_blocks[0], stride=2, option='B')  # 1
-        self.layer3 = self._make_layer(block, 32, num_blocks[0], stride=1, option='A')  # 2
-        self.layer4 = self._make_layer(block, 64, num_blocks[0], stride=2, option='B')  # 1
-        self.layer5 = self._make_layer(block, 64, num_blocks[0], stride=1, option='A')  # 2
+        self.layer2 = self._make_layer(block, 32, num_blocks[1], stride=2, option='B')  # 1
+        self.layer3 = self._make_layer(block, 32, num_blocks[2], stride=1, option='A')  # 2
+        self.layer4 = self._make_layer(block, 64, num_blocks[3], stride=2, option='B')  # 1
+        self.layer5 = self._make_layer(block, 64, num_blocks[4], stride=1, option='A')  # 2
 
         self.linear = nn.Linear(64, num_classes)
 
@@ -116,7 +111,7 @@ class ResNet(nn.Module):
         out = self.layer3(out)
         out = self.layer4(out)
         out = self.layer5(out)
-        out = F.avg_pool2d(out, (out.size()[3]))
+        out = F.avg_pool2d(out, 8)
         out = out.view(out.size(0), -1)
         out = self.linear(out)
         return out
@@ -124,41 +119,3 @@ class ResNet(nn.Module):
 
 def resnet20():
     return ResNet(BasicBlock, [3, 1, 2, 1, 2])
-
-
-def resnet32():
-    return ResNet(BasicBlock, [5, 5, 5])
-
-
-def resnet44():
-    return ResNet(BasicBlock, [7, 7, 7])
-
-
-def resnet56():
-    return ResNet(BasicBlock, [9, 9, 9])
-
-
-def resnet110():
-    return ResNet(BasicBlock, [18, 18, 18])
-
-
-def resnet1202():
-    return ResNet(BasicBlock, [200, 200, 200])
-
-
-def test(net):
-    import numpy as np
-    total_params = 0
-
-    for x in filter(lambda p: p.requires_grad, net.parameters()):
-        total_params += np.prod(x.data.numpy().shape)
-    print("Total number of params", total_params)
-    print("Total layers", len(list(filter(lambda p: p.requires_grad and len(p.data.size())>1, net.parameters()))))
-
-
-if __name__ == "__main__":
-    for net_name in __all__:
-        if net_name.startswith('resnet'):
-            print(net_name)
-            test(globals()[net_name]())
-            print()
