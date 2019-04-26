@@ -516,3 +516,5 @@ fabric.properties
 /tensorflow-examples-cifar10/cifar10_train/
 /PyTorch/ResNet.onnx
 *.txt
+*.onnx
+*.pth
