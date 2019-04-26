@@ -41,6 +41,7 @@ parser.add_argument('--num_examples', type=int, default=10000,
 parser.add_argument('--run_once', type=bool, default=False,
                     help='Whether to run eval only once.')
 
+
 def train():
   """Train CIFAR-10 for a number of steps."""
   with tf.Graph().as_default():
@@ -99,6 +100,7 @@ def train():
       while not mon_sess.should_stop():
         mon_sess.run(train_op)
 
+
 def eval_once(saver, summary_writer, top_k_op, summary_op):
   """Run Eval once.
 
@@ -152,6 +154,7 @@ def eval_once(saver, summary_writer, top_k_op, summary_op):
     coord.request_stop()
     coord.join(threads, stop_grace_period_secs=10)
 
+
 def evaluate():
   """Eval CIFAR-10 for a number of steps."""
   with tf.Graph().as_default() as g:
@@ -182,6 +185,7 @@ def evaluate():
       if FLAGS.run_once:
         break
       time.sleep(FLAGS.eval_interval_secs)
+
 
 def main(argv=None):  # pylint: disable=unused-argument
   cifar10.maybe_download_and_extract()

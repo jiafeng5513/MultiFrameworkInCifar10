@@ -11,7 +11,7 @@ import os
 from datetime import datetime
 
 
-log_frequency = 50
+log_frequency = 10
 batch_size = 32  # define for loggerHook
 
 
@@ -172,19 +172,40 @@ class Resnet18:
 
     # 定义损失函数
     def loss(self, logits, labels):
-        '''
-        计算CNN的loss
-        '''
+        """
+        Add L2Loss to all the trainable variables.
+           Add summary for "Loss" and "Loss/avg".
+        Args:
+            logits: Logits from inference().
+            labels: Labels from distorted_inputs or inputs(). 1-D tensor of shape [batch_size]
+        Returns:
+            Loss tensor of type float.
+        """
+        # Calculate the average cross entropy loss across the batch.
         labels = tf.cast(labels, tf.int64)
         cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
-            logits=logits, labels=labels, name='cross_entropy_per_example')
-        # tf.reduce_mean对cross entropy计算均值
+            labels=labels, logits=logits, name='cross_entropy_per_example')
         cross_entropy_mean = tf.reduce_mean(cross_entropy, name='cross_entropy')
-        # tf.add_to_collection:把cross entropy的loss添加到整体losses的collection中
         tf.add_to_collection('losses', cross_entropy_mean)
-        # tf.add_n将整体losses的collection中的全部loss求和得到最终的loss
+
+        # The total loss is defined as the cross entropy loss plus all of the weight decay terms (L2 loss).
         return tf.add_n(tf.get_collection('losses'), name='total_loss')
-        #return cross_entropy_mean
+
+    # 定义准确率
+    def acc(self,logits,labels):
+        """
+        计算一个batch的准确率
+        :param logits: 一个batch的输出,[batchsize,10]
+        :param labels: [batchsize,10]
+        :return: 准确率
+        """
+        true_count = 0
+        for i in range(0,self.batch_size):
+            Logit_item = logits[i]
+            label = labels[i]
+            if(np.argmax(Logit_item)==np.argmax(label)):
+                true_count=true_count+1
+        return true_count
 
     def _add_loss_summaries(self, total_loss):
         """Add summaries for losses in CIFAR-10 model.
@@ -281,6 +302,7 @@ class Resnet18:
             logits = self.inference(images_train, True)
             loss = self.loss(logits=logits, labels=labels_train)
             train_op = self.trainer(loss, global_step)
+            #train_acc=self.acc(logits,labels_train)
 
             class _LoggerHook(tf.train.SessionRunHook):
                 """Logs loss and runtime."""
@@ -312,8 +334,7 @@ class Resnet18:
                     hooks=[tf.train.StopAtStepHook(last_step=self.max_step),
                            tf.train.NanTensorHook(loss),
                            _LoggerHook()],
-                    config=tf.ConfigProto(
-                        log_device_placement=False)) as mon_sess:
+                    config=tf.ConfigProto(log_device_placement=False)) as mon_sess:
                 while not mon_sess.should_stop():
                     mon_sess.run(train_op)
 

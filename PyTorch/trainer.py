@@ -1,7 +1,7 @@
 import argparse
 import os
 import time
-
+import torch.onnx
 import torch
 import torch.nn as nn
 import torch.nn.parallel
@@ -10,6 +10,7 @@ import torch.optim
 import torch.utils.data
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
+from torch.autograd import Variable
 import resnet
 
 model_names = sorted(name for name in resnet.__dict__
@@ -18,19 +19,19 @@ model_names = sorted(name for name in resnet.__dict__
                      and callable(resnet.__dict__[name]))
 
 parser = argparse.ArgumentParser(description='Propert ResNets for CIFAR10 in pytorch')
-parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet32',
+parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet20',
                     choices=model_names,
                     help='model architecture: ' + ' | '.join(model_names) +
                     ' (default: resnet32)')
 parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
-parser.add_argument('--epochs', default=200, type=int, metavar='N',
+parser.add_argument('--epochs', default=1, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
-parser.add_argument('-b', '--batch-size', default=128, type=int,
+parser.add_argument('-b', '--batch-size', default=32, type=int,
                     metavar='N', help='mini-batch size (default: 128)')
-parser.add_argument('--lr', '--learning-rate', default=0.1, type=float,
+parser.add_argument('--lr', '--learning-rate', default=0.03, type=float,
                     metavar='LR', help='initial learning rate')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
@@ -94,7 +95,7 @@ def main():
         ]), download=True),
         batch_size=args.batch_size, shuffle=True,
         num_workers=args.workers, pin_memory=True)
-
+    input_var = list(enumerate(train_loader))[0][1][0]
     val_loader = torch.utils.data.DataLoader(
         datasets.CIFAR10(root='./data', train=False, transform=transforms.Compose([
             transforms.ToTensor(),
@@ -134,7 +135,6 @@ def main():
         print('current lr {:.5e}'.format(optimizer.param_groups[0]['lr']))
         train(train_loader, model, criterion, optimizer, epoch)
         lr_scheduler.step()
-
         # evaluate on validation set
         prec1 = validate(val_loader, model, criterion)
 
@@ -148,14 +148,21 @@ def main():
                 'state_dict': model.state_dict(),
                 'best_prec1': best_prec1,
             }, is_best, filename=os.path.join(args.save_dir, 'checkpoint.th'))
-
+    elapsed = (time.clock() - start)
     save_checkpoint({
         'state_dict': model.state_dict(),
         'best_prec1': best_prec1,
     }, is_best, filename=os.path.join(args.save_dir, 'model.th'))
+    #input_data = Variable(torch.randn(32, 3, 32, 32)).cuda()
+    #input_vars = list(enumerate(train_loader))
+    torch.onnx.export(model, input_var, "ResNet.onnx", export_params=True, verbose=True, training=False)
 
-    elapsed = (time.clock() - start)
     print("Time used (s):", elapsed)
+    i = 1
+    while os.path.exists("log_" + str(i) + ".txt"):
+        i = i + 1
+    output = open("log_" + str(i) + ".txt", 'w')
+    output.write("Test accuracy=%f,Time used %f s" % (best_prec1, elapsed))
 
 def train(train_loader, model, criterion, optimizer, epoch):
     """
