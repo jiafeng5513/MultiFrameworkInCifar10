@@ -124,15 +124,15 @@ def main():
         validate(val_loader, model, criterion)
         return
     # Run training
-    point1=point2=start = time.clock()
+
+    all_epoch_time=0
     for epoch in range(args.start_epoch, args.epochs):
 
         # train for one epoch
         print('current lr {:.5e}'.format(optimizer.param_groups[0]['lr']))
-        train(train_loader, model, criterion, optimizer, epoch)
+        all_epoch_time += train(train_loader, model, criterion, optimizer, epoch)
         lr_scheduler.step()
         # evaluate on validation set
-        point1=time.clock()
         prec1 = validate(val_loader, model, criterion)
 
         # remember best prec@1 and save checkpoint
@@ -145,8 +145,7 @@ def main():
                 'state_dict': model.state_dict(),
                 'best_prec1': best_prec1,
             }, is_best, filename=os.path.join(args.save_dir, 'checkpoint.th'))
-        point2=time.clock()
-    elapsed = (time.clock() - start)-(point2-point1)
+
     save_checkpoint({
         'state_dict': model.state_dict(),
         'best_prec1': best_prec1,
@@ -154,12 +153,12 @@ def main():
     input_data = Variable(torch.randn(32, 3, 32, 32)).cuda()
     torch.onnx.export(model, input_data, "ResNet.onnx", export_params=True, verbose=True, training=False)
 
-    print("Time used (s):", elapsed)
+    print("Time used (s):", all_epoch_time)
     i = 1
     while os.path.exists("log_" + str(i) + ".txt"):
         i = i + 1
     output = open("log_" + str(i) + ".txt", 'w')
-    output.write("Test accuracy=%f,Time used %f s" % (best_prec1, elapsed))
+    output.write("Test accuracy=%f,Time used %f s" % (best_prec1, all_epoch_time))
 
 def train(train_loader, model, criterion, optimizer, epoch):
     """
@@ -174,11 +173,12 @@ def train(train_loader, model, criterion, optimizer, epoch):
     model.train()
 
     end = time.time()
+    epoch_time = 0
     for i, (input, target) in enumerate(train_loader):
 
         # measure data loading time
         data_time.update(time.time() - end)
-
+        batch_start_time=time.clock()
         target = target.cuda(async=True)
         input_var = torch.autograd.Variable(input).cuda()
         target_var = torch.autograd.Variable(target)
@@ -204,7 +204,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
-
+        epoch_time+=(time.clock()-batch_start_time)
         if i % args.print_freq == 0:
             print('Epoch: [{0}][{1}/{2}]\t'
                   'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
@@ -213,6 +213,9 @@ def train(train_loader, model, criterion, optimizer, epoch):
                   'Prec@1 {top1.val:.3f} ({top1.avg:.3f})'.format(
                       epoch, i, len(train_loader), batch_time=batch_time,
                       data_time=data_time, loss=losses, top1=top1))
+
+    return epoch_time
+
 
 
 def validate(val_loader, model, criterion):
