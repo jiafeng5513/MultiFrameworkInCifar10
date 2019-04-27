@@ -10,15 +10,16 @@ import math
 import os
 from datetime import datetime
 
-
+# define for loggerHook,DO NOT USE IN OTHER PLACE!
 log_frequency = 10
-batch_size = 32  # define for loggerHook
+batch_size = 32
 
 
 class Resnet18:
     # 初始化
     def __init__(self, data_dir, boundaries, learing_rates, batch_size=32, epochs=200,
-                 number_train_samples=50000, number_test_samples=10000, checkpointdir="./checkpoint"):
+                 number_train_samples=50000, number_test_samples=10000,
+                 checkpointdir="./checkpoint", evaldir="./eval"):
         self.global_step = 0
         self.boundaries = boundaries
         self.learing_rates = learing_rates
@@ -28,6 +29,7 @@ class Resnet18:
         self.number_train_samples = number_train_samples
         self.number_test_samples = number_test_samples
         self.checkpointdir = checkpointdir
+        self.evaldir=evaldir
         self.max_step = int(self.number_train_samples/self.batch_size * self.epochs)
         self.MOVING_AVERAGE_DECAY = 0.9999  # The decay to use for the moving average.
 
@@ -71,7 +73,7 @@ class Resnet18:
         return conv_bn
 
     # 定义Residual Block V1
-    def ResidualBlockV1(self, input, output_dim, is_training=True, kernel_height=3, kernel_width=3, strides=1, name="res"):
+    def ResidualBlockV1(self, input, output_dim, is_training=True,  name="res"):
         """
         Residual Block V1,一路上是两个串联的卷积核BN,另一路是直通
         :param input:
@@ -84,17 +86,17 @@ class Resnet18:
         :return:
         """
         with tf.variable_scope(name+"_A"):
-            c1 = self.Convolution(input, output_dim, kernel_height, kernel_width, strides, strides, name=name+"_A")
+            c1 = self.Convolution(input, output_dim, 3, 3, 1, 1, name=name+"_A")
             bn1 = self.BatchNormalization(c1, is_training)
             r1 = tf.nn.relu(bn1)
         with tf.variable_scope(name+"_B"):
-            c2 = self.Convolution(r1, output_dim, kernel_height, kernel_width, strides, strides, name=name+"_B")
+            c2 = self.Convolution(r1, output_dim, 3, 3, 1, 1, name=name+"_B")
             bn2 = self.BatchNormalization(c2, is_training)
             plus = tf.add_n([input, bn2])
         return tf.nn.relu(plus)
 
     # 定义Residual Block V2
-    def ResidualBlockV2(self, input, output_dim1, is_training=True, kernel_height=3, kernel_width=3, strides=1, name="res"):
+    def ResidualBlockV2(self, input, output_dim1, is_training=True, name="res"):
         """
         Residual Block V2,一路上是两个串联的卷积核BN,另一路是一个卷积和BN
         :param input:           输入
@@ -338,6 +340,89 @@ class Resnet18:
                 while not mon_sess.should_stop():
                     mon_sess.run(train_op)
 
+    # 一次测试
+    def eval_once(self, saver, summary_writer, top_k_op, summary_op):
+      """Run Eval once.
+
+      Args:
+        saver: Saver.
+        summary_writer: Summary writer.
+        top_k_op: Top K op.
+        summary_op: Summary op.
+      """
+      with tf.Session() as sess:
+        ckpt = tf.train.get_checkpoint_state(self.checkpointdir)
+        if ckpt and ckpt.model_checkpoint_path:
+          # Restores from checkpoint
+          saver.restore(sess, ckpt.model_checkpoint_path)
+          # Assuming model_checkpoint_path looks something like:
+          #   /my-favorite-path/cifar10_train/model.ckpt-0,
+          # extract global_step from it.
+          global_step = ckpt.model_checkpoint_path.split('/')[-1].split('-')[-1]
+        else:
+          print('No checkpoint file found')
+          return
+
+        # Start the queue runners.
+        coord = tf.train.Coordinator()
+        try:
+          threads = []
+          for qr in tf.get_collection(tf.GraphKeys.QUEUE_RUNNERS):
+            threads.extend(qr.create_threads(sess, coord=coord, daemon=True,
+                                             start=True))
+
+          num_iter = int(math.ceil(self.number_test_samples / self.batch_size))
+          true_count = 0  # Counts the number of correct predictions.
+          total_sample_count = num_iter * self.batch_size
+          step = 0
+          while step < num_iter and not coord.should_stop():
+            predictions = sess.run([top_k_op])
+            true_count += np.sum(predictions)
+            step += 1
+
+          # Compute precision @ 1.
+          precision = true_count / total_sample_count
+          print('%s: Acc @ 1 = %.3f' % (datetime.now(), precision))
+
+          summary = tf.Summary()
+          summary.ParseFromString(sess.run(summary_op))
+          summary.value.add(tag='Precision @ 1', simple_value=precision)
+          summary_writer.add_summary(summary, global_step)
+        except Exception as e:  # pylint: disable=broad-except
+          coord.request_stop(e)
+
+        coord.request_stop()
+        coord.join(threads, stop_grace_period_secs=10)
+
+    # 测试
+    def evaluate(self,run_once=True,eval_interval_secs=300):
+      """Eval CIFAR-10 for a number of steps."""
+      with tf.Graph().as_default() as g:
+        eval_data = True
+        images, labels = cifar10_input.inputs(eval_data=eval_data,
+                                              data_dir=self.data_dir,# Build a Graph that computes the logits predictions from the
+                                              batch_size=self.batch_size)# inference model.
+        logits = self.inference(images,istraining=False)
+
+        # Calculate predictions.
+        top_k_op = tf.nn.in_top_k(logits, labels, 1)
+
+        # Restore the moving average version of the learned variables for eval.
+        variable_averages = tf.train.ExponentialMovingAverage(
+            self.MOVING_AVERAGE_DECAY)
+        variables_to_restore = variable_averages.variables_to_restore()
+        saver = tf.train.Saver(variables_to_restore)
+
+        # Build the summary operation based on the TF collection of Summaries.
+        summary_op = tf.summary.merge_all()
+
+        summary_writer = tf.summary.FileWriter(self.evaldir, g)
+
+        while True:
+          self.eval_once(saver, summary_writer, top_k_op, summary_op)
+          if run_once:
+            break
+          time.sleep(eval_interval_secs)
 
 """Class Resnet18 is over"""
 
@@ -345,8 +430,9 @@ class Resnet18:
 def main(argv=None):
     datadir="./tmp/cifar10_data/cifar-10-batches-bin"
     checkpointdir= "./checkpoints/"
+    evaldir = "./eval/"
     batch_size = 32
-    epochs = 200
+    epochs = 1
     number_train_samples = 50000
     number_test_samples = 10000
     # 一个step是一个batch
@@ -357,14 +443,14 @@ def main(argv=None):
 
 
     model = Resnet18(datadir, boundaries, learing_rates, batch_size, epochs,
-                     number_train_samples, number_test_samples, checkpointdir)
+                     number_train_samples, number_test_samples, checkpointdir,evaldir)
 
     #cifar10.maybe_download_and_extract()
     if tf.gfile.Exists(checkpointdir):
         tf.gfile.DeleteRecursively(checkpointdir)
     tf.gfile.MakeDirs(checkpointdir)
     model.train()
-
+    #model.evaluate()
 
 
 if __name__ == "__main__":
