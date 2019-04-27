@@ -170,7 +170,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
     top1 = AverageMeter()
 
     # switch to train mode
-    model.train_and_test()
+    model.train()
 
     end = time.time()
     epoch_time = 0

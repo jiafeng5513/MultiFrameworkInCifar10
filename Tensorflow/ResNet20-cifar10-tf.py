@@ -176,14 +176,14 @@ class Resnet20:
         # tf.add_n将整体losses的collection中的全部loss求和得到最终的loss
         return tf.add_n(tf.get_collection('losses'), name='total_loss')
 
-    # 训练和测试
-    def train_and_test(self):
+    # 训练
+    def train(self):
         sess = tf.InteractiveSession()
 
         # 模型准备
-        image_holder = tf.placeholder(tf.float32, [self.batch_size, 32, 32, 3])#
+        image_holder = tf.placeholder(tf.float32, [self.batch_size, 32, 32, 3], name="input")#
         label_holder = tf.placeholder(tf.int32, [self.batch_size])
-        is_training_holder = tf.placeholder(tf.bool)
+        is_training_holder = tf.placeholder(tf.bool,name="is_training")
 
         logits = self.inference(image_holder, is_training_holder)
         loss = self.loss(logits, label_holder)
@@ -192,16 +192,14 @@ class Resnet20:
         learning_rate = tf.train.piecewise_constant(x=global_step, boundaries=self.boundaries, values=self.learing_rates)
 
         train_op = tf.train.AdamOptimizer(learning_rate).minimize(loss,global_step=global_step)
-        top_k_op = tf.nn.in_top_k(logits, label_holder, 1)
+
 
         # 数据准备
         cifar_train = tfds.load(name="cifar10", split=tfds.Split.TRAIN)
         cifar_train = cifar_train.repeat(self.epochs).shuffle(self.number_train_samples).batch(self.batch_size)
         cifar_train = cifar_train.prefetch(tf.data.experimental.AUTOTUNE)
 
-        cifar_test = tfds.load(name="cifar10", split=tfds.Split.TEST)
-        cifar_test = cifar_test.repeat(1).shuffle(self.number_test_samples).batch(self.batch_size)
-        cifar_test = cifar_test.prefetch(tf.data.experimental.AUTOTUNE)
+
 
         #训练准备
         tf.global_variables_initializer().run()
@@ -223,32 +221,52 @@ class Resnet20:
                     print(format_str % (step, epoch, lr, loss_value))
         time_cost=time.clock()-start_time
 
-        # 测试
-        true_count = 0
-        valid_batch = 0
-        for batch in tfds.as_numpy(cifar_test):
-            images, labels = batch["image"], batch["label"]
-            # 计算这个batch的top 1上预测正确的样本数
-            if np.shape(images)[0] == self.batch_size:
-                preditcions = sess.run([top_k_op], feed_dict={image_holder: images,
-                                                              label_holder: labels,
-                                                              is_training_holder:False})
-                true_count += np.sum(preditcions)
-                valid_batch += 1
-                print('test batch %d,total %d samples,Num of correct is %d'%(valid_batch,self.batch_size, np.sum(preditcions)))
+        # 保存pb文件
+        constant_graph = tf.compat.v1.graph_util.convert_variables_to_constants(sess, sess.graph_def, ["out/output/Softmax"])
+        with tf.gfile.FastGFile("ResNet20-cifar10-tf.pb", mode='wb') as f:
+            f.write(constant_graph.SerializeToString())
+        sess.close()
 
-        # 准确率
-        precision = true_count / (valid_batch*self.batch_size)
-        print('acc = %.4f' % precision)
+        return time_cost
 
-        # 输出训练日志
-        i = 1
-        while os.path.exists("log_" + str(i) + ".txt"):
-            i = i + 1
-        output = open("log_" + str(i) + ".txt", 'w')
-        output.write("Test accuracy=%f,Time used %f s" % (precision, time_cost))
+    # 测试
+    def test(self):
+        with tf.Graph().as_default():
+            output_graph_def = tf.GraphDef()
+            with open("ResNet20-cifar10-tf.pb", "rb") as f:
+                output_graph_def.ParseFromString(f.read())
+                _ = tf.import_graph_def(output_graph_def, name="")
+                with tf.Session() as sess:
+                    init = tf.global_variables_initializer()
+                    sess.run(init)
+                    image_holder = sess.graph.get_tensor_by_name("input:0")
+                    logits = sess.graph.get_tensor_by_name("out/output/Softmax:0")
+                    is_training_holder = sess.graph.get_tensor_by_name("is_training:0")
+                    label_holder = tf.placeholder(tf.int32, [self.batch_size])
+                    top_k_op = tf.nn.in_top_k(logits, label_holder, 1)
 
-"""Class Resnet20 is over"""
+                    cifar_test = tfds.load(name="cifar10", split=tfds.Split.TEST)
+                    cifar_test = cifar_test.repeat(1).shuffle(self.number_test_samples).batch(self.batch_size)
+                    cifar_test = cifar_test.prefetch(tf.data.experimental.AUTOTUNE)
+
+                    true_count = 0
+                    valid_batch = 0
+                    for batch in tfds.as_numpy(cifar_test):
+                        images, labels = batch["image"], batch["label"]
+                        # 计算这个batch的top 1上预测正确的样本数
+                        if np.shape(images)[0] == self.batch_size:
+                            preditcions = sess.run([top_k_op], feed_dict={image_holder: images,
+                                                                          label_holder: labels,
+                                                                          is_training_holder:False})
+                            true_count += np.sum(preditcions)
+                            valid_batch += 1
+                            print('test batch %d,total %d samples,Num of correct is %d'%(valid_batch,self.batch_size, np.sum(preditcions)))
+
+                    # 准确率
+                    precision = true_count / (valid_batch*self.batch_size)
+                    print('acc = %.4f' % precision)
+                    return precision
+
 
 def main(argv=None):
     batch_size = 32
@@ -262,8 +280,14 @@ def main(argv=None):
     model = Resnet20( boundaries, learing_rates, batch_size, epochs,
                      number_train_samples, number_test_samples)
 
-    model.train_and_test()
-
+    time_cost=model.train()
+    precision=model.test()
+    # 输出训练日志
+    i = 1
+    while os.path.exists("log_" + str(i) + ".txt"):
+        i = i + 1
+    output = open("log_" + str(i) + ".txt", 'w')
+    output.write("Test accuracy=%f,Time used %f s" % (precision, time_cost))
 
 if __name__ == "__main__":
     #os.environ["CUDA_VISIBLE_DEVICES"] = "1,2,3"
