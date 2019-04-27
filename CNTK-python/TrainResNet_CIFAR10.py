@@ -167,7 +167,7 @@ def train_and_evaluate(reader_train, reader_test, network_name, epoch_size, max_
 
     # Evaluation parameters
     test_epoch_size = 10000
-    minibatch_size = 16
+    minibatch_size = 32
 
     # process minibatches and evaluate the model
     metric_numer = 0

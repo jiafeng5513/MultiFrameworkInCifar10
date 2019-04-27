@@ -83,7 +83,7 @@ namespace CommonHelper
             var featureStreamInfo = testMinibatchSource.StreamInfo(featureInputName);
             var labelStreamInfo = testMinibatchSource.StreamInfo(labelInputName);
 
-            int batchSize = 50;
+            int batchSize = 32;
             int miscountTotal = 0, totalCount = 0;
             while (true)
             {
@@ -118,8 +118,8 @@ namespace CommonHelper
             }
 
             float errorRate = 1.0F * miscountTotal / totalCount;
-            Console.WriteLine($"Model Validation Error = {errorRate}");
-            return errorRate;
+            Console.WriteLine($"Model Validation Acc = {1-errorRate}");
+            return 1-errorRate;
         }
 
         public static void SaveAndReloadModel(ref Function function, IList<Variable> variables, DeviceDescriptor device, uint rank = 0)
@@ -169,8 +169,12 @@ namespace CommonHelper
             {
                 float trainLossValue = (float)trainer.PreviousMinibatchLossAverage();
                 float evaluationValue = (float)trainer.PreviousMinibatchEvaluationAverage();
-                
-                Console.WriteLine($"Minibatch: {minibatchIdx} LearningRate: {learner.LearningRate()} CrossEntropyLoss = {trainLossValue}, EvaluationCriterion = {evaluationValue}");
+                int epoch_number = minibatchIdx/((int)50000/32)+1;
+                Console.WriteLine($"epoch: { epoch_number} "+
+                                  $"Minibatch: {minibatchIdx} " +
+                                  $"LearningRate: {learner.LearningRate()} " +
+                                  $"CrossEntropyLoss = {trainLossValue}, " +
+                                  $"EvaluationCriterion = {evaluationValue}");
             }
         }
 

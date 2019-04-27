@@ -62,7 +62,7 @@ namespace TrainCifarResNet
 
                 // prepare for training
                 var trainingLoss = CNTKLib.CrossEntropyWithSoftmax(classifierOutput, labelsVar, "lossFunction");
-                var prediction = CNTKLib.ClassificationError(classifierOutput, labelsVar, 5, "predictionError");
+                var prediction = CNTKLib.ClassificationError(classifierOutput, labelsVar, 3, "predictionError");
 
                 //学习率策略
                 double[] lrs = {3e-2, 3e-3, 3e-4, 3e-4, 5e-5};//学习率
@@ -80,7 +80,7 @@ namespace TrainCifarResNet
                 //动量
                 var momentum = new TrainingParameterScheduleDouble(0.9, 1);
                 //SGD Learner
-                var sgdLearner = Learner.SGDLearner(classifierOutput.Parameters(), learningRateSchedule);
+                //var sgdLearner = Learner.SGDLearner(classifierOutput.Parameters(), learningRateSchedule);
                 //Adam Learner
                 ParameterVector parameterVector=new ParameterVector();
                 foreach (var parameter in classifierOutput.Parameters())
@@ -110,7 +110,7 @@ namespace TrainCifarResNet
                         { { imageInput, minibatchData[imageStreamInfo] },
                           { labelsVar,  minibatchData[labelStreamInfo] } }, device);
                     
-                    TestHelper.PrintTrainingProgress(trainer, sgdLearner,miniBatchCount++, outputFrequencyInMinibatches);
+                    TestHelper.PrintTrainingProgress(trainer, adamLearner, miniBatchCount++, outputFrequencyInMinibatches);
                 }
 
                 // save the model
@@ -119,12 +119,12 @@ namespace TrainCifarResNet
                 Console.WriteLine("*****************Train Stop*****************");
 
                 // validate the model
-                float errorRate = ValidateModel(device, modelFile);
+                float acc = ValidateModel(device, modelFile);
                 sw.Stop();
                 TimeSpan ts2 = sw.Elapsed;
 
                 Console.WriteLine("*****************Validate Stop*****************");
-                string logstr = "Total time :" + ts2.TotalSeconds + "s.Error rate:" + errorRate;
+                string logstr = "Total time :" + ts2.TotalSeconds + "s. acc:" + acc;
                 Console.WriteLine(logstr);
 
                 int i = 1;
@@ -147,10 +147,12 @@ namespace TrainCifarResNet
                     imageDim, numClasses, "features", "labels", "classifierOutput", device);
             }
 
-            private static Function ConvBatchNormalizationReLULayer(Variable input, int outFeatureMapCount, int kernelWidth, int kernelHeight, int hStride, int vStride,
-                double wScale, double bValue, double scValue, int bnTimeConst, bool spatial, DeviceDescriptor device)
+            private static Function ConvBatchNormalizationReLULayer(Variable input, int outFeatureMapCount, 
+                int kernelWidth, int kernelHeight, int hStride, int vStride,double wScale, 
+                double bValue, double scValue, int bnTimeConst, bool spatial, DeviceDescriptor device)
             {
-                var convBNFunction = ConvBatchNormalizationLayer(input, outFeatureMapCount, kernelWidth, kernelHeight, hStride, vStride, wScale, bValue, scValue, bnTimeConst, spatial, device);
+                var convBNFunction = ConvBatchNormalizationLayer(input, outFeatureMapCount, 
+                    kernelWidth, kernelHeight, hStride, vStride, wScale, bValue, scValue, bnTimeConst, spatial, device);
                 return CNTKLib.ReLU(convBNFunction);
             }
 
@@ -182,8 +184,8 @@ namespace TrainCifarResNet
                 return CNTKLib.ReLU(p);
             }
 
-            private static Function ResNetNodeInc(Variable input, int outFeatureMapCount, int kernelWidth, int kernelHeight, double wScale, double bValue,
-                double scValue, int bnTimeConst, bool spatial, Variable wProj, DeviceDescriptor device)
+            private static Function ResNetNodeInc(Variable input, int outFeatureMapCount, int kernelWidth, int kernelHeight, 
+                double wScale, double bValue,double scValue, int bnTimeConst, bool spatial, Variable wProj, DeviceDescriptor device)
             {
                 var c1 = ConvBatchNormalizationReLULayer(input, outFeatureMapCount, kernelWidth, kernelHeight, 2, 2, wScale, bValue, scValue, bnTimeConst, spatial, device);
                 var c2 = ConvBatchNormalizationLayer(c1, outFeatureMapCount, kernelWidth, kernelHeight, 1, 1, wScale, bValue, scValue, bnTimeConst, spatial, device);
@@ -248,39 +250,39 @@ namespace TrainCifarResNet
                 double scValue = 1;
                 int bnTimeConst = 4096;
 
-                int kernelWidth = 3;
-                int kernelHeight = 3;
+                //int kernelWidth = 3;
+                //int kernelHeight = 3;
 
                 double conv1WScale = 0.26;
-                int cMap1 = 16;
-                var conv1 = ConvBatchNormalizationReLULayer(input, cMap1, kernelWidth, kernelHeight, 1, 1, conv1WScale, convBValue, scValue, bnTimeConst, true /*spatial*/, device);
+                //int cMap1 = 16;
+                var conv1 = ConvBatchNormalizationReLULayer(input, 16, 3, 3, 1, 1, conv1WScale, convBValue, scValue, bnTimeConst, true /*spatial*/, device);
 
-                var rn1_1 = ResNetNode(conv1, cMap1, kernelWidth, kernelHeight, convWScale, convBValue, scValue, bnTimeConst, false /*spatial*/, device);
-                var rn1_2 = ResNetNode(rn1_1, cMap1, kernelWidth, kernelHeight, convWScale, convBValue, scValue, bnTimeConst, true /*spatial*/, device);
-                var rn1_3 = ResNetNode(rn1_2, cMap1, kernelWidth, kernelHeight, convWScale, convBValue, scValue, bnTimeConst, false /*spatial*/, device);
+                var rn1_1 = ResNetNode(conv1, 16, 3, 3, convWScale, convBValue, scValue, bnTimeConst, false /*spatial*/, device);
+                var rn1_2 = ResNetNode(rn1_1, 16, 3, 3, convWScale, convBValue, scValue, bnTimeConst, true /*spatial*/, device);
+                var rn1_3 = ResNetNode(rn1_2, 16, 3, 3, convWScale, convBValue, scValue, bnTimeConst, false /*spatial*/, device);
 
-                int cMap2 = 32;
-                var rn2_1_wProj = GetProjectionMap(cMap2, cMap1, device);
-                var rn2_1 = ResNetNodeInc(rn1_3, cMap2, kernelWidth, kernelHeight, convWScale, convBValue, scValue, bnTimeConst, true /*spatial*/, rn2_1_wProj, device);
-                var rn2_2 = ResNetNode(rn2_1, cMap2, kernelWidth, kernelHeight, convWScale, convBValue, scValue, bnTimeConst, false /*spatial*/, device);
-                var rn2_3 = ResNetNode(rn2_2, cMap2, kernelWidth, kernelHeight, convWScale, convBValue, scValue, bnTimeConst, true /*spatial*/, device);
+                //int cMap2 = 32;
+                var rn2_1_wProj = GetProjectionMap(32, 16, device);
+                var rn2_1 = ResNetNodeInc(rn1_3, 32, 3, 3, convWScale, convBValue, scValue, bnTimeConst, true /*spatial*/, rn2_1_wProj, device);
+                var rn2_2 = ResNetNode(rn2_1, 32, 3, 3, convWScale, convBValue, scValue, bnTimeConst, false /*spatial*/, device);
+                var rn2_3 = ResNetNode(rn2_2, 32, 3, 3, convWScale, convBValue, scValue, bnTimeConst, true /*spatial*/, device);
 
-                int cMap3 = 64;
-                var rn3_1_wProj = GetProjectionMap(cMap3, cMap2, device);
-                var rn3_1 = ResNetNodeInc(rn2_3, cMap3, kernelWidth, kernelHeight, convWScale, convBValue, scValue, bnTimeConst, true /*spatial*/, rn3_1_wProj, device);
-                var rn3_2 = ResNetNode(rn3_1, cMap3, kernelWidth, kernelHeight, convWScale, convBValue, scValue, bnTimeConst, false /*spatial*/, device);
-                var rn3_3 = ResNetNode(rn3_2, cMap3, kernelWidth, kernelHeight, convWScale, convBValue, scValue, bnTimeConst, false /*spatial*/, device);
+                //int cMap3 = 64;
+                var rn3_1_wProj = GetProjectionMap(64, 32, device);
+                var rn3_1 = ResNetNodeInc(rn2_3, 64, 3, 3, convWScale, convBValue, scValue, bnTimeConst, true /*spatial*/, rn3_1_wProj, device);
+                var rn3_2 = ResNetNode(rn3_1, 64, 3, 3, convWScale, convBValue, scValue, bnTimeConst, false /*spatial*/, device);
+                var rn3_3 = ResNetNode(rn3_2, 64, 3, 3, convWScale, convBValue, scValue, bnTimeConst, false /*spatial*/, device);
 
                 // Global average pooling
                 int poolW = 8;
                 int poolH = 8;
-                int poolhStride = 1;
-                int poolvStride = 1;
+                int poolhStride = 8;
+                int poolvStride = 8;
                 var pool = CNTKLib.Pooling(rn3_3, PoolingType.Average,
                     new int[] { poolW, poolH, 1 }, new int[] { poolhStride, poolvStride, 1 });
 
                 // Output DNN layer
-                var outTimesParams = new Parameter(new int[] { numOutputClasses, 1, 1, cMap3 }, DataType.Float,
+                var outTimesParams = new Parameter(new int[] { numOutputClasses, 1, 1, 64 }, DataType.Float,
                     CNTKLib.GlorotUniformInitializer(fc1WScale, 1, 0), device);
                 var outBiasParams = new Parameter(new int[] { numOutputClasses }, (float)fc1BValue, device, "");
 
