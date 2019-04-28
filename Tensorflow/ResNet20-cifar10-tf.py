@@ -6,6 +6,7 @@ import os
 import tensorflow_datasets as tfds
 from tensorflow import keras
 from keras.layers import normalization
+from onnx_tf.frontend import tensorflow_graph_to_onnx_model
 from sklearn import preprocessing
 import keras.layers
 # define for loggerHook,DO NOT USE IN OTHER PLACE!
@@ -24,9 +25,10 @@ class Resnet20:
         self.number_train_samples = number_train_samples
         self.number_test_samples = number_test_samples
 
+
     # 定义卷积
     def Convolution(self, input_, output_dim, kernel_height=1, kernel_width=1,
-                    stride_height=1, stride_width=1, with_blas=False, name="w", padding="SAME"):
+                    stride_height=1, stride_width=1, with_blas=False, padding="SAME"):
         """
         :param input_:       输入变量
         :param output_dim:   输出维数
@@ -38,13 +40,10 @@ class Resnet20:
         :param with_blas:    是否使用blas
         :return:
         """
-        # 权重随机初始化的标准差
-        stddev = np.sqrt(2.0 / (kernel_height * kernel_width * input_.get_shape().as_list()[-1] * output_dim))
-        # 权重
-        w = tf.get_variable(name, [kernel_height, kernel_width, input_.get_shape()[-1], output_dim],
-                            initializer=tf.truncated_normal_initializer(stddev=stddev))
-        # 卷积
-        conv = tf.nn.conv2d(input_, w, strides=[1, stride_height, stride_width, 1], padding=padding)
+        input_channels =(int)(input_.get_shape()[-1])
+        initial = tf.truncated_normal([kernel_height, kernel_width, input_channels, output_dim], stddev=0.1)
+        weight = tf.Variable(initial)
+        conv = tf.nn.conv2d(input_, weight, strides=[1, stride_height, stride_width, 1], padding=padding)
         # blas
         if with_blas:
             bias = tf.get_variable("b",[output_dim], initializer=tf.constant_initializer(0.0))
@@ -52,72 +51,36 @@ class Resnet20:
         else:
             return conv
 
-    # BatchNormalization
-    def BatchNormalization(self, input, is_training):
-        """
-        BatchNormalization
-        :param input:输入变量
-        :param is_training:是否在训练
-        :return:
-        """
-
-
-
-        conv_bn = tf.layers.batch_normalization(input, training=is_training, epsilon=1e-5)
-        return conv_bn
-
     # 定义Residual Block V1
     def ResidualBlockV1(self, input, output_dim,  name="res"):
-        """
-        Residual Block V1,一路上是两个串联的卷积核BN,另一路是直通
-        :param input:
-        :param output_dim:
-        :param is_training:
-        :param kernel_height:
-        :param kernel_width:
-        :param strides:
-        :param name:
-        :return:+"_A"
-        """
         with tf.variable_scope(name):
-            c1 = self.Convolution(input, output_dim, 3, 3, 1, 1, name=name+"_A")
+            c1 = self.Convolution(input, output_dim, 3, 3, 1, 1)
             #bn1 = self.BatchNormalization(c1, is_training)
             bn1=normalization.BatchNormalization()(c1)
-            r1 = tf.nn.relu(bn1)
-        with tf.variable_scope(name+"_B"):
-            c2 = self.Convolution(r1, output_dim, 3, 3, 1, 1, name=name+"_B")
+            r1 = tf.nn.relu(c1)
+        #with tf.variable_scope(name+"_B"):
+            c2 = self.Convolution(r1, output_dim, 3, 3, 1, 1)
             #bn2 = self.BatchNormalization(c2, is_training)
             bn2 = normalization.BatchNormalization()(c2)
-            plus = tf.add_n([input, bn2])
+            plus = tf.add_n([input, c2])
         return tf.nn.relu(plus)
 
     # 定义Residual Block V2
     def ResidualBlockV2(self, input, output_dim1, name="res"):
-        """
-        Residual Block V2,一路上是两个串联的卷积核BN,另一路是一个卷积和BN
-        :param input:           输入
-        :param output_dim:      输出维数
-        :param is_training:     是否在训练
-        :param kernel_height:   卷积核尺寸h
-        :param kernel_width:    卷积核尺寸w
-        :param strides:         步长,两个方向相等
-        :param name:
-        :return:
-        """
-        with tf.variable_scope(name+"_A"):
-            c1 = self.Convolution(input, output_dim1, 3, 3, 2, 2, name=name+"_A")
+        with tf.variable_scope(name):
+            c1 = self.Convolution(input, output_dim1, 3, 3, 2, 2)
             #bn1 = self.BatchNormalization(c1, is_training)
             bn1 = normalization.BatchNormalization()(c1)
-            r1 = tf.nn.relu(bn1)
-        with tf.variable_scope(name+"_B"):
-            c2 = self.Convolution(r1, output_dim1, 3, 3, 1, 1, name=name+"_B")
+            r1 = tf.nn.relu(c1)
+        #with tf.variable_scope(name+"_B"):
+            c2 = self.Convolution(r1, output_dim1, 3, 3, 1, 1)
             #bn2 = self.BatchNormalization(c2, is_training)
             bn2 = normalization.BatchNormalization()(c2)
-        with tf.variable_scope(name+"_C"):
-            c3 = self.Convolution(input, output_dim1, 1, 1, 2, 2, name=name+"_C", padding="VALID")
+        #with tf.variable_scope(name+"_C"):
+            c3 = self.Convolution(input, output_dim1, 1, 1, 2, 2, padding="VALID")
             #bn3 = self.BatchNormalization(c3, is_training)
             bn3 = normalization.BatchNormalization()(c3)
-            plus = tf.add_n([bn3, bn2])
+            plus = tf.add_n([c3, c2])
 
         return tf.nn.relu(plus)
 
@@ -129,36 +92,29 @@ class Resnet20:
         :return:  输出
         """
         with tf.name_scope("Conv1"):
-            c1 = self.Convolution(x, 16, 3, 3, 1, 1, with_blas=False, name="conv1")
+            c1 = self.Convolution(x, 16, 3, 3, 1, 1, with_blas=False)
             #bn1 = self.BatchNormalization(c1, istraining)
             bn1 = normalization.BatchNormalization()(c1)
-            conv1 = tf.nn.relu(bn1)
-        with tf.name_scope("res1"):
-            res1 = self.ResidualBlockV1(conv1, 16,  name="res1")
-        with tf.name_scope("res2"):
-            res2 = self.ResidualBlockV1(res1, 16,  name="res2")
-        with tf.name_scope("res3"):
-            res3 = self.ResidualBlockV1(res2, 16,  name="res3")
-        with tf.name_scope("res4"):
-            res4 = self.ResidualBlockV2(res3, 32,  name="res4")
-        with tf.name_scope("res5"):
-            res5 = self.ResidualBlockV1(res4, 32,  name="res5")
-        with tf.name_scope("res6"):
-            res6 = self.ResidualBlockV1(res5, 32,  name="res6")
-        with tf.name_scope("res7"):
-            res7 = self.ResidualBlockV2(res6, 64,  name="res7")
-        with tf.name_scope("res8"):
-            res8 = self.ResidualBlockV1(res7, 64,  name="res8")
-        with tf.name_scope("res9"):
-            res9 = self.ResidualBlockV1(res8, 64,  name="res10")
-        with tf.name_scope("out"):
-            #act = tf.nn.relu(res9)
-            avp = tf.nn.avg_pool(res9, ksize=[1, 8, 8, 1], strides=[1, 8, 8, 1], padding="VALID", name="AveragePooling")
-            #fln = keras.layers.Flatten()(avp)
-            fln = tf.layers.flatten(avp, name="Flatten")
-            #keras.layers.Dense(units=10,activation='softmax',use_bias=True)()
-            output = tf.layers.dense(fln, activation='softmax', units=10, use_bias=True, kernel_initializer='he_normal',
-                                        name="output")
+            conv1 = tf.nn.relu(c1)
+        res1 = self.ResidualBlockV1(conv1, 16,  name="res1")
+        res2 = self.ResidualBlockV1(res1, 16,  name="res2")
+        res3 = self.ResidualBlockV1(res2, 16,  name="res3")
+
+        res4 = self.ResidualBlockV2(res3, 32,  name="res4")
+        res5 = self.ResidualBlockV1(res4, 32,  name="res5")
+        res6 = self.ResidualBlockV1(res5, 32,  name="res6")
+
+        res7 = self.ResidualBlockV2(res6, 64,  name="res7")
+        res8 = self.ResidualBlockV1(res7, 64,  name="res8")
+        res9 = self.ResidualBlockV1(res8, 64,  name="res10")
+
+
+        avp = tf.nn.avg_pool(res9, ksize=[1, 8, 8, 1], strides=[1, 8, 8, 1], padding="VALID", name="AveragePooling")
+        #fln = keras.layers.Flatten()(avp)
+        fln = tf.layers.flatten(avp, name="Flatten")
+        #keras.layers.Dense(units=10,activation='softmax',use_bias=True)()
+        output = tf.layers.dense(fln, activation=tf.nn.softmax, units=10, use_bias=False, kernel_initializer='he_normal',
+                                    name="output")
         return output
 
     # 计算学习率
@@ -194,16 +150,12 @@ class Resnet20:
 
     # 标准化
     def normalixe(self,data):
-        mean = [0.485, 0.456, 0.406]
-        std = [0.229, 0.224, 0.225]
+        # mean = [0.485, 0.456, 0.406]
+        # std = [0.229, 0.224, 0.225]
         # data is [n,32,32,3]
-        for i in range(np.shape(data)[0]):
-            for j in range(np.shape(data)[1]):
-                for k in range(np.shape(data)[2]):
-                    data[i][j][k][0] = (data[i][j][k][0] / 255 - mean[0]) / std[0]
-                    data[i][j][k][1] = (data[i][j][k][1] / 255 - mean[1]) / std[1]
-                    data[i][j][k][2] = (data[i][j][k][2] / 255 - mean[2]) / std[2]
-        return data
+        x_train = data.astype('float32') / 255
+        mean=np.mean(x_train, axis=0)
+        return x_train-mean
 
     # 训练
     def train(self):
@@ -220,7 +172,7 @@ class Resnet20:
         global_step = tf.Variable(1, trainable=False,dtype=tf.int64)
         learning_rate = tf.train.piecewise_constant(x=global_step, boundaries=self.boundaries, values=self.learing_rates)
         tf.summary.scalar("lr", learning_rate)
-        train_op = tf.train.GradientDescentOptimizer(learning_rate).minimize(loss=loss,global_step=global_step)
+        train_op = tf.train.AdamOptimizer(learning_rate,epsilon=0.01).minimize(loss=loss,global_step=global_step)
         summary_op = tf.summary.merge_all()
 
         summary_writer = tf.summary.FileWriter("log",graph_def=sess.graph_def)
@@ -252,11 +204,21 @@ class Resnet20:
                     format_str = ('step %d, epoch=%d, lr=%f, loss=%.4f')
                     print(format_str % (step, epoch, lr, loss_value))
         time_cost=time.clock()-start_time
-
+        var=sess.graph_def
         # 保存pb文件
-        constant_graph = tf.compat.v1.graph_util.convert_variables_to_constants(sess, sess.graph_def, ["out/output/Softmax"])
+        constant_graph = tf.compat.v1.graph_util.convert_variables_to_constants(sess, sess.graph_def, ["output/Softmax"])
         with tf.gfile.FastGFile("ResNet20-cifar10-tf.pb", mode='wb') as f:
             f.write(constant_graph.SerializeToString())
+        # 转换成ONNX
+        # with tf.gfile.GFile("ResNet20-cifar10-tf.pb", "rb") as f:
+        #     graph_def = tf.GraphDef()
+        #     graph_def.ParseFromString(f.read())
+        #     onnx_model = tensorflow_graph_to_onnx_model(graph_def,"output/Softmax",opset=2)
+        #
+        #     file = open("ResNet20-cifar10-tf.onnx", "wb")
+        #     file.write(onnx_model.SerializeToString())
+        #     file.close()
+
         sess.close()
 
         return time_cost
@@ -272,7 +234,7 @@ class Resnet20:
                     init = tf.global_variables_initializer()
                     sess.run(init)
                     image_holder = sess.graph.get_tensor_by_name("input:0")
-                    logits = sess.graph.get_tensor_by_name("out/output/Softmax:0")
+                    logits = sess.graph.get_tensor_by_name("output/Softmax:0")
                     #is_training_holder = sess.graph.get_tensor_by_name("is_training:0")
                     label_holder = tf.placeholder(tf.int64, [self.batch_size])
                     top_k_op = tf.nn.in_top_k(logits, label_holder, 1)
@@ -285,10 +247,10 @@ class Resnet20:
                     valid_batch = 0
                     for batch in tfds.as_numpy(cifar_test):
                         images, labels = batch["image"], batch["label"]
-                        images = images.astype('float32') / 255
+                        images_n = self.normalixe(images)
                         # 计算这个batch的top 1上预测正确的样本数
                         if np.shape(images)[0] == self.batch_size:
-                            preditcions = sess.run([top_k_op], feed_dict={image_holder: images,
+                            preditcions = sess.run([top_k_op], feed_dict={image_holder: images_n,
                                                                           label_holder: labels})
                             true_count += np.sum(preditcions)
                             valid_batch += 1
@@ -302,7 +264,7 @@ class Resnet20:
 
 def main(argv=None):
     batch_size = 32
-    epochs = 2
+    epochs = 1
     number_train_samples = 50000
     number_test_samples = 10000
     boundaries_epoch=[80, 120, 160, 180]  # 学习率变化阈值,epoch到达阈值后学习率发生变化
@@ -324,3 +286,6 @@ def main(argv=None):
 if __name__ == "__main__":
     #os.environ["CUDA_VISIBLE_DEVICES"] = "1,2,3"
     tf.app.run()
+
+
+    #sess.close()
