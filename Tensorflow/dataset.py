@@ -32,7 +32,7 @@ for batch in tfds.as_numpy(cifar_train):
     i=0
     p=p+1
     for lab in labels:
-        if lab ==1:
+        if lab ==10:
             img=images[i]
             plt.imshow(img[:, :, 0].astype(np.float32), cmap=plt.get_cmap("gray"))
             plt.show()
