@@ -29,7 +29,7 @@ NUM_EXAMPLES_PER_EPOCH_FOR_EVAL = cifar10_input.NUM_EXAMPLES_PER_EPOCH_FOR_EVAL
 # 一个epoch有多少个batch
 NUM_BATCHES_PRE_RPOCH_FOE_TRAIN = (int)(NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN/batch_size)
 # 一共训练多少个Epoch
-MAX_EPOCH = 3
+MAX_EPOCH = 200
 # 训练次数控制,一个step是一个batch
 max_steps = NUM_BATCHES_PRE_RPOCH_FOE_TRAIN*MAX_EPOCH
 # The decay to use for the moving average.
