@@ -26,8 +26,6 @@ num_channels = 3  # RGB
 num_classes = 10
 
 
-
-
 # Define the reader for both training and evaluation action.
 def create_image_mb_source(map_file, mean_file, train, total_number_of_samples):
     if not os.path.exists(map_file) or not os.path.exists(mean_file):
@@ -244,7 +242,7 @@ def train_and_evaluate(reader_train, reader_test, network_name, epoch_size, max_
     trainer.summarize_test_progress()
     print("")
     elapsed = (time.clock() - start)
-    return metric_numer / metric_denom, elapsed
+    return 1-metric_numer / metric_denom, elapsed
 
 
 if __name__ == '__main__':
@@ -267,9 +265,9 @@ if __name__ == '__main__':
     accuracy, time = train_and_evaluate(reader_train, reader_test, network_name, epoch_size, epochs, minibatch_size,
                         model_dir, log_dir, tensorboard_logdir, False, False)
 
-    print("error rate=%f,Time used=%f s" % (accuracy, time))
+    print("acc=%f,Time used=%f s" % (accuracy, time))
     i=1
     while os.path.exists("log_"+str(i)+".txt"):
         i=i+1
     output = open("log_"+str(i)+".txt", 'w')
-    output.write("error rate=%f,Time used=%f s" % (accuracy, time))
+    output.write("acc=%f,Time used=%f s" % (accuracy, time))
