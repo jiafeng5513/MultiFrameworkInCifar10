@@ -1,311 +1,515 @@
 # -*- coding: UTF-8 -*-
 import tensorflow as tf
 import numpy as np
-import time
 import os
-import tensorflow_datasets as tfds
-from tensorflow import keras
-from keras.layers import normalization
-from onnx_tf.frontend import tensorflow_graph_to_onnx_model
-from sklearn import preprocessing
-import keras.layers
-# define for loggerHook,DO NOT USE IN OTHER PLACE!
+import re
+import sys
+import urllib
+import tarfile
+from datetime import datetime
+import time
+import math
+import cifar10_input
+
 log_frequency = 10
 batch_size = 32
+NUM_CLASSES = 10
+
+TOWER_NAME = 'tower'
+DATA_URL = 'http://www.cs.toronto.edu/~kriz/cifar-10-binary.tar.gz'
+dest_directory = '../CIFAR-10'
+checkpoint_dir = './checkpoints'
+eval_dir = './eval'
+log_device_placement = False
+
+# 一个训练的epoch含有多少样本 50000
+NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = cifar10_input.NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN
+# 一个测试的epoch含有多少样本 10000
+NUM_EXAMPLES_PER_EPOCH_FOR_EVAL = cifar10_input.NUM_EXAMPLES_PER_EPOCH_FOR_EVAL
+# 一个epoch有多少个batch
+NUM_BATCHES_PRE_RPOCH_FOE_TRAIN = (int)(NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN/batch_size)
+# 一共训练多少个Epoch
+MAX_EPOCH = 200
+# 训练次数控制,一个step是一个batch
+max_steps = NUM_BATCHES_PRE_RPOCH_FOE_TRAIN*MAX_EPOCH
+# The decay to use for the moving average.
+MOVING_AVERAGE_DECAY = 0.9999
+# 学习率变化阈值,epoch到达阈值后学习率发生变化
+boundaries_epoch = [80, 120, 160, 180]
+# 学习率取值
+learing_rates = [3e-2, 3e-3, 3e-4, 3e-4, 5e-5]
+
+def maybe_download_and_extract():
+  """Download and extract the tarball from Alex's website."""
+
+  if not os.path.exists(dest_directory):
+    os.makedirs(dest_directory)
+  filename = DATA_URL.split('/')[-1]
+  filepath = os.path.join(dest_directory, filename)
+  if not os.path.exists(filepath):
+    def _progress(count, block_size, total_size):
+      sys.stdout.write('\r>> Downloading %s %.1f%%' % (filename,
+          float(count * block_size) / float(total_size) * 100.0))
+      sys.stdout.flush()
+    filepath, _ = urllib.request.urlretrieve(DATA_URL, filepath, _progress)
+    print()
+    statinfo = os.stat(filepath)
+    print('Successfully downloaded', filename, statinfo.st_size, 'bytes.')
+  extracted_dir_path = os.path.join(dest_directory, 'cifar-10-batches-bin')
+  if not os.path.exists(extracted_dir_path):
+    tarfile.open(filepath, 'r:gz').extractall(dest_directory)
+
+def distorted_inputs():
+  """Construct distorted input for CIFAR training using the Reader ops.
+
+  Returns:
+    images: Images. 4D tensor of [batch_size, IMAGE_SIZE, IMAGE_SIZE, 3] size.
+    labels: Labels. 1D tensor of [batch_size] size.
+
+  Raises:
+    ValueError: If no data_dir
+  """
+
+  data_dir = os.path.join(dest_directory, 'cifar-10-batches-bin')
+  images, labels = cifar10_input.distorted_inputs(data_dir=data_dir,
+                                                  batch_size=batch_size)
+
+  return images, labels
+
+def inputs(eval_data):
+  """Construct input for CIFAR evaluation using the Reader ops.
+
+  Args:
+    eval_data: bool, indicating if one should use the train or eval data set.
+
+  Returns:
+    images: Images. 4D tensor of [batch_size, IMAGE_SIZE, IMAGE_SIZE, 3] size.
+    labels: Labels. 1D tensor of [batch_size] size.
+
+  Raises:
+    ValueError: If no data_dir
+  """
+
+  data_dir = os.path.join(dest_directory, 'cifar-10-batches-bin')
+  images, labels = cifar10_input.inputs(eval_data=eval_data,
+                                        data_dir=data_dir,
+                                        batch_size=batch_size)
+
+  return images, labels
+
+def _activation_summary(x):
+  """Helper to create summaries for activations.
+
+  Creates a summary that provides a histogram of activations.
+  Creates a summary that measures the sparsity of activations.
+
+  Args:
+    x: Tensor
+  Returns:
+    nothing
+  """
+  # Remove 'tower_[0-9]/' from the name in case this is a multi-GPU training
+  # session. This helps the clarity of presentation on tensorboard.
+  tensor_name = re.sub('%s_[0-9]*/' % TOWER_NAME, '', x.op.name)
+  tf.summary.histogram(tensor_name + '/activations', x)
+  tf.summary.scalar(tensor_name + '/sparsity',
+                                       tf.nn.zero_fraction(x))
+
+def _add_loss_summaries(total_loss):
+  """Add summaries for losses in CIFAR-10 model.
+
+  Generates moving average for all losses and associated summaries for
+  visualizing the performance of the network.
+
+  Args:
+    total_loss: Total loss from loss().
+  Returns:
+    loss_averages_op: op for generating moving averages of losses.
+  """
+  # Compute the moving average of all individual losses and the total loss.
+  loss_averages = tf.train.ExponentialMovingAverage(0.9, name='avg')
+  losses = tf.get_collection('losses')
+  loss_averages_op = loss_averages.apply(losses + [total_loss])
+
+  # Attach a scalar summary to all individual losses and the total loss; do the
+  # same for the averaged version of the losses.
+  for l in losses + [total_loss]:
+    # Name each loss as '(raw)' and name the moving average version of the loss
+    # as the original loss name.
+    tf.summary.scalar(l.op.name + ' (raw)', l)
+    tf.summary.scalar(l.op.name, loss_averages.average(l))
+
+  return loss_averages_op
+
+def resV1(input,k,name):
+    with tf.variable_scope(name) as scope:
+        kernel_1 = _variable_with_weight_decay('weights_1',
+                                               shape=[3, 3, (int)(input.get_shape()[-1]), k],
+                                               stddev=5e-2,
+                                               wd=0.0)
+        conv_1 = tf.nn.conv2d(input, kernel_1, [1, 1, 1, 1], padding='SAME')
+        re = tf.nn.relu(conv_1, name=scope.name+'-1')
+        kernel_2 = _variable_with_weight_decay('weights_2',
+                                               shape=[3, 3, (int)(input.get_shape()[-1]), k],
+                                               stddev=5e-2,
+                                               wd=0.0)
+        conv_2 = tf.nn.conv2d(re, kernel_2, [1, 1, 1, 1], padding='SAME')
+        res1 = tf.nn.relu(tf.add_n([input, conv_2]), name=scope.name+'-2')
+        _activation_summary(res1)
+        return res1
+
+def resV2(input,k,name):
+    with tf.variable_scope(name) as scope:
+        kernel_1 = _variable_with_weight_decay('weights_1',
+                                               shape=[3, 3, (int)(input.get_shape()[-1]), k],
+                                               stddev=5e-2,
+                                               wd=0.0)
+        conv_1 = tf.nn.conv2d(input, kernel_1, [1, 2, 2, 1], padding='SAME')
+        re = tf.nn.relu(conv_1, name=scope.name+'-1')
+        kernel_2 = _variable_with_weight_decay('weights_2',
+                                               shape=[3, 3, (int)(re.get_shape()[-1]), k],
+                                               stddev=5e-2,
+                                               wd=0.0)
+        conv_2 = tf.nn.conv2d(re, kernel_2, [1, 1, 1, 1], padding='SAME')
+
+        kernel_3 = _variable_with_weight_decay('weights_3',
+                                               shape=[1, 1, (int)(input.get_shape()[-1]), k],
+                                               stddev=5e-2,
+                                               wd=0.0)
+        conv_3 = tf.nn.conv2d(input, kernel_3, [1, 2, 2, 1], padding='SAME')
+
+        res1 = tf.nn.relu(tf.add_n([conv_3, conv_2]), name=scope.name+'-2')
+        _activation_summary(res1)
+        return res1
+
+def inference_res20(images):
+  """Build the CIFAR-10 model.
+
+  Args:
+    images: Images returned from distorted_inputs() or inputs().
+
+  Returns:
+    Logits.
+  """
+  # We instantiate all variables using tf.get_variable() instead of
+  # tf.Variable() in order to share variables across multiple GPU training runs.
+  # If we only ran this model on a single GPU, we could simplify this function
+  # by replacing all instances of tf.get_variable() with tf.Variable().
+  #
+  # conv1
+  with tf.variable_scope('conv1') as scope:
+    kernel = _variable_with_weight_decay('weights',
+                                         shape=[3, 3, 3, 16],
+                                         stddev=5e-2,
+                                         wd=0.0)
+    conv = tf.nn.conv2d(images, kernel, [1, 1, 1, 1], padding='SAME')
+    biases = _variable_on_cpu('biases', [16], tf.constant_initializer(0.0))
+    pre_activation = tf.nn.bias_add(conv, biases)
+    conv1 = tf.nn.relu(pre_activation, name=scope.name)
+    _activation_summary(conv1)
+
+  # res
+  res1 = resV1(conv1, 16, "res1")
+  res2 = resV1(res1, 16, "res2")
+  res3 = resV1(res2, 16, "res3")
+
+  res4 = resV2(res3, 32, "res4")
+  res5 = resV1(res4, 32, "res5")
+  res6 = resV1(res5, 32, "res6")
+
+  res7 = resV2(res6, 64, "res7")
+  res8 = resV1(res7, 64, "res8")
+  res9 = resV1(res8, 64, "res9")
 
 
-class Resnet20:
-    # 初始化
-    def __init__(self, boundaries, learing_rates, batch_size=32, epochs=200,
-                 number_train_samples=50000, number_test_samples=10000):
-        self.boundaries = boundaries
-        self.learing_rates = learing_rates
-        self.batch_size = batch_size
-        self.epochs = epochs
-        self.number_train_samples = number_train_samples
-        self.number_test_samples = number_test_samples
+  with tf.variable_scope('softmax_linear') as scope:
+    pool = tf.nn.avg_pool(res9, ksize=[1, 8, 8, 1],
+                            strides=[1, 8, 8, 1], padding='SAME', name='pool')
+    weights = _variable_with_weight_decay('weights', [64, NUM_CLASSES],
+                                          stddev=1/64.0, wd=0.0)
+    biases = _variable_on_cpu('biases', [NUM_CLASSES],
+                              tf.constant_initializer(0.0))
+    softmax_linear = tf.add(tf.matmul(tf.layers.Flatten()(pool), weights), biases, name=scope.name)
+    _activation_summary(softmax_linear)
 
+  return softmax_linear
 
-    # 定义卷积
-    def Convolution(self, input_, output_dim, kernel_height=1, kernel_width=1,
-                    stride_height=1, stride_width=1, with_blas=False, padding="SAME"):
-        # input_channels =(int)(input_.get_shape()[-1])
-        # initial = tf.truncated_normal([kernel_height, kernel_width, input_channels, output_dim], stddev=0.1)
-        # weight = tf.Variable(initial)
-        # conv = tf.nn.conv2d(input_, weight, strides=[1, stride_height, stride_width, 1], padding=padding)
+def _variable_on_cpu(name, shape, initializer):
+  """Helper to create a Variable stored on CPU memory.
 
-        conv = tf.keras.layers.Conv2D(filters=output_dim,kernel_size=(kernel_height,kernel_width),
-                               strides=(stride_height,stride_width),use_bias=with_blas,padding="same")(input_)
-        # blas
-        # if with_blas:
-        #     bias = tf.get_variable("b",[output_dim], initializer=tf.constant_initializer(0.0))
-        #     return tf.nn.bias_add(conv, bias)
-        # else:
-        return conv
+  Args:
+    name: name of the variable
+    shape: list of ints
+    initializer: initializer for Variable
 
-    # 定义Residual Block V1
-    def ResidualBlockV1(self, input, output_dim,  name="res"):
-        with tf.variable_scope(name):
-            c1 = self.Convolution(input, output_dim, 3, 3, 1, 1)
-            #bn1 = self.BatchNormalization(c1, is_training)
-            bn1=tf.keras.layers.BatchNormalization()(c1)
-            r1 = tf.keras.layers.ReLU()(bn1)
-        #with tf.variable_scope(name+"_B"):
-            c2 = self.Convolution(r1, output_dim, 3, 3, 1, 1)
-            #bn2 = self.BatchNormalization(c2, is_training)
-            bn2 = tf.keras.layers.BatchNormalization()(c2)
-            plus = tf.keras.layers.add([input, bn2])
-        return tf.keras.layers.ReLU()(plus)
+  Returns:
+    Variable Tensor
+  """
+  with tf.device('/cpu:0'):
+    var = tf.get_variable(name, shape, initializer=initializer, dtype=tf.float32)
+  return var
 
-    # 定义Residual Block V2
-    def ResidualBlockV2(self, input, output_dim1, name="res"):
-        with tf.variable_scope(name):
-            c1 = self.Convolution(input, output_dim1, 3, 3, 2, 2)
-            #bn1 = self.BatchNormalization(c1, is_training)
-            bn1 = tf.keras.layers.BatchNormalization()(c1)
-            r1 = tf.keras.layers.ReLU()(bn1)
-        #with tf.variable_scope(name+"_B"):
-            c2 = self.Convolution(r1, output_dim1, 3, 3, 1, 1)
-            #bn2 = self.BatchNormalization(c2, is_training)
-            bn2 = tf.keras.layers.BatchNormalization()(c2)
-        #with tf.variable_scope(name+"_C"):
-            c3 = self.Convolution(input, output_dim1, 1, 1, 2, 2)
-            #bn3 = self.BatchNormalization(c3, is_training)
-            bn3 = tf.keras.layers.BatchNormalization()(c3)
-            plus = tf.keras.layers.add([bn3, bn2])
+def _variable_with_weight_decay(name, shape, stddev, wd):
+  """Helper to create an initialized Variable with weight decay.
 
-        return tf.keras.layers.ReLU()(plus)
+  Note that the Variable is initialized with a truncated normal distribution.
+  A weight decay is added only if one is specified.
 
-    # 定义网络
-    def inference(self, x):
-        """
-        构造整个网络
-        :param x: 输入
-        :return:  输出
-        """
-        with tf.name_scope("Conv1"):
-            c1 = self.Convolution(x, 16, 3, 3, 1, 1, with_blas=False)
-            bn1 = tf.keras.layers.BatchNormalization()(c1)
-            conv1 = tf.keras.layers.ReLU()(bn1)
-        res1 = self.ResidualBlockV1(conv1, 16,  name="res1")
-        res2 = self.ResidualBlockV1(res1, 16,  name="res2")
-        res3 = self.ResidualBlockV1(res2, 16,  name="res3")
+  Args:
+    name: name of the variable
+    shape: list of ints
+    stddev: standard deviation of a truncated Gaussian
+    wd: add L2Loss weight decay multiplied by this float. If None, weight
+        decay is not added for this Variable.
 
-        res4 = self.ResidualBlockV2(res3, 32,  name="res4")
-        res5 = self.ResidualBlockV1(res4, 32,  name="res5")
-        res6 = self.ResidualBlockV1(res5, 32,  name="res6")
+  Returns:
+    Variable Tensor
+  """
+  var = _variable_on_cpu(
+      name,
+      shape,
+      tf.truncated_normal_initializer(stddev=stddev, dtype=tf.float32))
+  if wd is not None:
+    weight_decay = tf.multiply(tf.nn.l2_loss(var), wd, name='weight_loss')
+    tf.add_to_collection('losses', weight_decay)
+  return var
 
-        res7 = self.ResidualBlockV2(res6, 64,  name="res7")
-        res8 = self.ResidualBlockV1(res7, 64,  name="res8")
-        res9 = self.ResidualBlockV1(res8, 64,  name="res10")
+def loss_res20(logits, labels):
+  """Add L2Loss to all the trainable variables.
 
+  Add summary for "Loss" and "Loss/avg".
+  Args:
+    logits: Logits from inference().
+    labels: Labels from distorted_inputs or inputs(). 1-D tensor
+            of shape [batch_size]
 
-        #avp = tf.nn.avg_pool(res9, ksize=[1, 8, 8, 1], strides=[1, 8, 8, 1], padding="VALID", name="AveragePooling")
+  Returns:
+    Loss tensor of type float.
+  """
+  # Calculate the average cross entropy loss across the batch.
+  labels = tf.cast(labels, tf.int64)
+  cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
+      labels=labels, logits=logits, name='cross_entropy_per_example')
+  cross_entropy_mean = tf.reduce_mean(cross_entropy, name='cross_entropy')
+  tf.add_to_collection('losses', cross_entropy_mean)
 
-        avp = tf.keras.layers.AvgPool2D((8,8),(8,8))(res9)
-        #fln = keras.layers.Flatten()(avp)
-        fln = tf.keras.layers.Flatten()(avp)
-        #keras.layers.Dense(units=10,activation='softmax',use_bias=True)()
-        output = tf.keras.layers.Dense(units=10,activation='softmax',kernel_initializer='he_normal')(fln)
-        return output
+  # The total loss is defined as the cross entropy loss plus all of the weight
+  # decay terms (L2 loss).
+  return tf.add_n(tf.get_collection('losses'), name='total_loss')
 
-    # 计算学习率
-    def get_Learning_rate(self, step):
-        if step < self.boundaries[0]:
-            return self.learing_rates[0]
-        elif step >= self.boundaries[0] and step < self.boundaries[1]:
-            return self.learing_rates[1]
-        elif step >= self.boundaries[1] and step < self.boundaries[2]:
-            return self.learing_rates[2]
-        elif step >= self.boundaries[2] and step < self.boundaries[3]:
-            return self.learing_rates[3]
-        elif step >= self.boundaries[3]:
-            return self.learing_rates[4]
+def getTrainOp(total_loss, global_step):
+  """Train CIFAR-10 model.
 
-    # 定义损失函数
-    def loss(self, logits, labels):
-        labels = tf.cast(tf.one_hot(labels,10,1,0), tf.float32)
-        loss=-tf.reduce_sum(labels*tf.log(logits))
+  Create an optimizer and apply to all trainable variables. Add moving
+  average for all trainable variables.
 
-        # cce = tf.keras.losses.CategoricalCrossentropy()
-        # la=tf.one_hot(labels,10,1,0)
-        # loss = cce(la,logits)
-        #print('Loss: ', loss.numpy())  # Loss: 0.3239
+  Args:
+    total_loss: Total loss from loss().
+    global_step: Integer Variable counting the number of training steps
+      processed.
+  Returns:
+    train_op: op for training.
+  """
+  # Variables that affect learning rate.
+  # num_batches_per_epoch = NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN / batch_size
+  # decay_steps = int(num_batches_per_epoch * NUM_EPOCHS_PER_DECAY)
+  #
+  # # Decay the learning rate exponentially based on the number of steps.
+  # lr = tf.train.exponential_decay(INITIAL_LEARNING_RATE,
+  #                                 global_step,
+  #                                 decay_steps,
+  #                                 LEARNING_RATE_DECAY_FACTOR,
+  #                                 staircase=True)
 
+  boundaries = [item * NUM_BATCHES_PRE_RPOCH_FOE_TRAIN for item in boundaries_epoch]
+  learning_rate = tf.train.piecewise_constant(x=global_step, boundaries=boundaries, values=learing_rates)
+  tf.summary.scalar('learning_rate', learning_rate)
 
-        '''计算CNN的loss
-        tf.nn.sparse_softmax_cross_entropy_with_logits作用：
-        把softmax计算和cross_entropy_loss计算合在一起'''
-        #labels = tf.cast(labels, tf.int64)
-        # cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
-        #     logits=logits, labels=labels, name='cross_entropy_per_example')
-        # # tf.reduce_mean对cross entropy计算均值
-        # cross_entropy_mean = tf.reduce_mean(cross_entropy,
-        #                                     name='cross_entropy')
-        # # tf.add_to_collection:把cross entropy的loss添加到整体losses的collection中
-        # cross_entropy_mean_res=tf.add_to_collection('losses', cross_entropy_mean)
-        # tf.add_n将整体losses的collection中的全部loss求和得到最终的loss
-        #return tf.add_n(tf.get_collection('losses'), name='total_loss')
-        return tf.reduce_mean(loss)
+  # Generate moving averages of all losses and associated summaries.
+  loss_averages_op = _add_loss_summaries(total_loss)
 
+  # Compute gradients.
+  with tf.control_dependencies([loss_averages_op]):
+    opt = tf.train.GradientDescentOptimizer(learning_rate)
+    grads = opt.compute_gradients(total_loss)
 
-    def evaluation(self,logits, labels):
-        with tf.variable_scope("accuracy") as scope:
-            correct = tf.nn.in_top_k(logits, labels, 1)
-            correct = tf.cast(correct, tf.float16)
-            accuracy = tf.reduce_mean(correct)
-            #tf.summary.scalar(scope.name + "accuracy", accuracy)
-        return accuracy
+  # Apply gradients.
+  apply_gradient_op = opt.apply_gradients(grads, global_step=global_step)
 
-    # 标准化
-    def normalixe(self,data):
-        # mean = [0.485, 0.456, 0.406]
-        # std = [0.229, 0.224, 0.225]
-        # data is [n,32,32,3]
-        x_train = data.astype('float32') / 255
-        mean=np.mean(x_train, axis=0)
-        return x_train
+  # Add histograms for trainable variables.
+  for var in tf.trainable_variables():
+    tf.summary.histogram(var.op.name, var)
 
-    # 训练
-    def train(self):
-        # 模型准备
-        image_holder = tf.placeholder(tf.float32, [None, 32, 32, 3], name="input")#
-        label_holder = tf.placeholder(tf.int64, [None])
+  # Add histograms for gradients.
+  for grad, var in grads:
+    if grad is not None:
+      tf.summary.histogram(var.op.name + '/gradients', grad)
 
-        logits = self.inference(image_holder)
-        loss = self.loss(logits, label_holder)
-        train_acc = self.evaluation(logits, label_holder)
+  # Track the moving averages of all trainable variables.
+  variable_averages = tf.train.ExponentialMovingAverage(
+      MOVING_AVERAGE_DECAY, global_step)
+  variables_averages_op = variable_averages.apply(tf.trainable_variables())
 
-        global_step = tf.Variable(1, trainable=False,dtype=tf.int64)
-        learning_rate = tf.train.piecewise_constant(x=global_step, boundaries=self.boundaries, values=self.learing_rates)
+  with tf.control_dependencies([apply_gradient_op, variables_averages_op]):
+    train_op = tf.no_op(name='train')
 
-        train_op = tf.train.AdamOptimizer(learning_rate=learning_rate,
-                                          epsilon=0.01).minimize(loss=loss,global_step=global_step)
+  return train_op
 
-        # 数据准备
-        cifar_train = tfds.load(name="cifar10", split=tfds.Split.TRAIN)
-        cifar_train = cifar_train.repeat(self.epochs).shuffle(self.number_train_samples).batch(self.batch_size)
-        cifar_train = cifar_train.prefetch(tf.data.experimental.AUTOTUNE)
+def train():
+  """Train CIFAR-10 for a number of steps."""
+  with tf.Graph().as_default():
+    global_step = tf.train.get_or_create_global_step()
 
+    # Get images and labels for CIFAR-10.
+    # Force input pipeline to CPU:0 to avoid operations sometimes ending up on
+    # GPU and resulting in a slow down.
+    with tf.device('/cpu:0'):
+      images, labels = distorted_inputs()
 
+    # Build a Graph that computes the logits predictions from the
+    # inference model.
+    logits = inference_res20(images)
 
-        #训练准备
-        sess = tf.InteractiveSession()
-        tf.global_variables_initializer().run()
-        num_batches_per_epoch = int(self.number_train_samples / self.batch_size)
-        #训练循环
-        start_time=time.clock()
-        for batch in tfds.as_numpy(cifar_train):
-            images, labels = batch["image"], batch["label"]
-            images_n = self.normalixe(images) #images.astype('float32') / 255self.batch_size
-            lr = sess.run(learning_rate)
-            step = sess.run(global_step)
-            #log=sess.run(logits,feed_dict={image_holder: images})
-            _, loss_value,acc = sess.run([train_op, loss, train_acc],
-                                     feed_dict={image_holder: images_n,
-                                                label_holder: labels})
-            if step % 20 == 0:
-                epoch=step/num_batches_per_epoch+1
-                format_str = ('step %d, epoch=%d, lr=%f, loss=%.4f, acc=%.4f')
-                print(format_str % (step, epoch, lr, loss_value, acc))
-        # end of for
+    # Calculate loss.
+    loss = loss_res20(logits, labels)
 
-        time_cost=time.clock()-start_time
-        var=sess.graph_def
-        # 保存pb文件
-        if os.path.exists("ResNet20-cifar10-tf.pb"):
-            os.remove("ResNet20-cifar10-tf.pb")
-        constant_graph = tf.compat.v1.graph_util.convert_variables_to_constants(sess, sess.graph_def, ["dense/Softmax"])
-        with tf.gfile.FastGFile("ResNet20-cifar10-tf.pb", mode='wb') as f:
-            f.write(constant_graph.SerializeToString())
+    # Build a Graph that trains the model with one batch of examples and
+    # updates the model parameters.
+    train_op = getTrainOp(loss, global_step)
 
-        # 测试
-        top_k_op = tf.nn.in_top_k(logits, label_holder, 1)
-        cifar_test = tfds.load(name="cifar10", split=tfds.Split.TEST)
-        cifar_test = cifar_test.repeat(1).shuffle(self.number_test_samples).batch(self.batch_size)
-        cifar_test = cifar_test.prefetch(tf.data.experimental.AUTOTUNE)
-        true_count = 0
-        total_number = 0
-        for batch in tfds.as_numpy(cifar_test):
-            images, labels = batch["image"], batch["label"]
-            images_n = self.normalixe(images)
-            # 计算这个batch的top 1上预测正确的样本数
-            if np.shape(images)[0] >= 0:  # self.batch_size
-                preditcions, logits_out = sess.run([top_k_op, logits], feed_dict={image_holder: images_n,
-                                                                                  label_holder: labels})
-                true_count += np.sum(preditcions)
-                total_number += np.shape(images)[0]
-                print('total %d samples,Num of correct is %d' % (total_number, true_count))
+    class _LoggerHook(tf.train.SessionRunHook):
+      """Logs loss and runtime."""
 
-        # 准确率
-        precision = true_count / total_number
-        print('acc = %.4f' % precision)
-        return precision,time_cost
+      def begin(self):
+        self._step = -1
+        self._start_time = time.time()
 
+      def before_run(self, run_context):
+        self._step += 1
+        return tf.train.SessionRunArgs(loss)  # Asks for loss value.
 
-    # 测试
-    def test(self):
-        with tf.Graph().as_default():
-            output_graph_def = tf.GraphDef()
-            with open("ResNet20-cifar10-tf.pb", "rb") as f:
-                output_graph_def.ParseFromString(f.read())
-                _ = tf.import_graph_def(output_graph_def, name="")
-                with tf.Session() as sess:
-                    init = tf.global_variables_initializer()
+      def after_run(self, run_context, run_values):
+        if self._step % log_frequency == 0:
+          current_time = time.time()
+          duration = current_time - self._start_time
+          self._start_time = current_time
 
-                    image_holder = sess.graph.get_tensor_by_name("input:0")
-                    logits = sess.graph.get_tensor_by_name("dense/Softmax:0")
-                    #is_training_holder = sess.graph.get_tensor_by_name("is_training:0")
-                    label_holder = tf.placeholder(tf.int64, [None])
-                    top_k_op = tf.nn.in_top_k(logits, label_holder, 1)
+          loss_value = run_values.results
+          examples_per_sec = log_frequency * batch_size / duration
+          sec_per_batch = float(duration / log_frequency)
+          epoch=(int)(self._step/NUM_BATCHES_PRE_RPOCH_FOE_TRAIN)+1
 
-                    cifar_test = tfds.load(name="cifar10", split=tfds.Split.TEST)
-                    cifar_test = cifar_test.repeat(1).shuffle(self.number_test_samples).batch(self.batch_size)
-                    cifar_test = cifar_test.prefetch(tf.data.experimental.AUTOTUNE)
-                    sess.run(init)
-                    true_count = 0
-                    total_number = 0
-                    for batch in tfds.as_numpy(cifar_test):
-                        images, labels = batch["image"], batch["label"]
-                        images_n = self.normalixe(images)
-                        # 计算这个batch的top 1上预测正确的样本数
-                        if np.shape(images)[0] >=0:# self.batch_size
-                            preditcions,logits_out = sess.run([top_k_op,logits], feed_dict={image_holder: images_n,
-                                                                          label_holder: labels})
-                            true_count += np.sum(preditcions)
-                            total_number += np.shape(images)[0]
-                            print('total %d samples,Num of correct is %d'%(total_number, true_count))
+          format_str = ('%s: step %d, epoch = %d/%d, loss = %.2f (%.1f examples/sec; %.3f '
+                        'sec/batch)')
+          print (format_str % (datetime.now(), self._step, epoch,MAX_EPOCH, loss_value,
+                               examples_per_sec, sec_per_batch))
 
-                    # 准确率
-                    precision = true_count / total_number
-                    print('acc = %.4f' % precision)
-                    return precision
+    start_time = time.clock()
+    with tf.train.MonitoredTrainingSession(
+        checkpoint_dir=checkpoint_dir,
+        hooks=[tf.train.StopAtStepHook(last_step=max_steps),
+               tf.train.NanTensorHook(loss),
+               _LoggerHook()],
+        config=tf.ConfigProto(
+            log_device_placement=log_device_placement)) as mon_sess:
+      while not mon_sess.should_stop():
+        mon_sess.run(train_op)
+    return time.clock() - start_time
 
+def eval_once(saver, summary_writer, top_k_op, summary_op):
+  """Run Eval once.
 
-def main(argv=None):
-    batch_size = 32
-    epochs = 1
-    number_train_samples = 50000
-    number_test_samples = 10000
-    boundaries_epoch=[80, 120, 160, 180]  # 学习率变化阈值,epoch到达阈值后学习率发生变化
-    boundaries = [item * int(number_train_samples/batch_size) for item in boundaries_epoch]
-    learing_rates = [3e-2, 3e-3, 3e-4, 3e-4, 5e-5]  # 学习率取值
+  Args:
+    saver: Saver.
+    summary_writer: Summary writer.
+    top_k_op: Top K op.
+    summary_op: Summary op.
+  """
+  with tf.Session() as sess:
+    ckpt = tf.train.get_checkpoint_state(checkpoint_dir)
+    if ckpt and ckpt.model_checkpoint_path:
+      # Restores from checkpoint
+      saver.restore(sess, ckpt.model_checkpoint_path)
+      # Assuming model_checkpoint_path looks something like:
+      #   /my-favorite-path/cifar10_train/model.ckpt-0,
+      # extract global_step from it.
+      global_step = ckpt.model_checkpoint_path.split('/')[-1].split('-')[-1]
+    else:
+      print('No checkpoint file found')
+      return
 
-    model = Resnet20( boundaries, learing_rates, batch_size, epochs,
-                     number_train_samples, number_test_samples)
+    # Start the queue runners.
+    coord = tf.train.Coordinator()
+    try:
+      threads = []
+      for qr in tf.get_collection(tf.GraphKeys.QUEUE_RUNNERS):
+        threads.extend(qr.create_threads(sess, coord=coord, daemon=True,
+                                         start=True))
 
-    precision,time_cost=model.train()
-    #precision=model.test()
+      num_iter = int(math.ceil(NUM_EXAMPLES_PER_EPOCH_FOR_EVAL / batch_size))
+      true_count = 0  # Counts the number of correct predictions.
+      total_sample_count = num_iter * batch_size
+      step = 0
+      while step < num_iter and not coord.should_stop():
+        predictions = sess.run([top_k_op])
+        true_count += np.sum(predictions)
+        step += 1
+
+      # Compute precision @ 1.
+      precision = true_count / total_sample_count
+      print('%s: precision @ 1 = %.3f' % (datetime.now(), precision))
+
+      summary = tf.Summary()
+      summary.ParseFromString(sess.run(summary_op))
+      summary.value.add(tag='Precision @ 1', simple_value=precision)
+      summary_writer.add_summary(summary, global_step)
+    except Exception as e:  # pylint: disable=broad-except
+      coord.request_stop(e)
+
+    coord.request_stop()
+    coord.join(threads, stop_grace_period_secs=10)
+    return precision
+
+def evaluate():
+  """Eval CIFAR-10 for a number of steps."""
+  with tf.Graph().as_default() as g:
+    # Get images and labels for CIFAR-10.
+
+    images, labels = inputs(eval_data=True)
+
+    # Build a Graph that computes the logits predictions from the
+    # inference model.
+    logits = inference_res20(images)
+
+    # Calculate predictions.
+    top_k_op = tf.nn.in_top_k(logits, labels, 1)
+
+    # Restore the moving average version of the learned variables for eval.
+    variable_averages = tf.train.ExponentialMovingAverage(MOVING_AVERAGE_DECAY)
+    variables_to_restore = variable_averages.variables_to_restore()
+    saver = tf.train.Saver(variables_to_restore)
+
+    # Build the summary operation based on the TF collection of Summaries.
+    summary_op = tf.summary.merge_all()
+    summary_writer = tf.summary.FileWriter(eval_dir, g)
+    return eval_once(saver, summary_writer, top_k_op, summary_op)
+
+if __name__ == "__main__":
+    maybe_download_and_extract()
+    if tf.gfile.Exists(checkpoint_dir):
+        tf.gfile.DeleteRecursively(checkpoint_dir)
+    tf.gfile.MakeDirs(checkpoint_dir)
+    time_used = train()
+
+    if tf.gfile.Exists(eval_dir):
+        tf.gfile.DeleteRecursively(eval_dir)
+    tf.gfile.MakeDirs(eval_dir)
+    acc = evaluate()
+
+    print ("total time used: %fs, acc=%f, write in log file!" % (time_used,acc))
     # 输出训练日志
     i = 1
     while os.path.exists("log_" + str(i) + ".txt"):
         i = i + 1
     output = open("log_" + str(i) + ".txt", 'w')
-    output.write("Test accuracy=%f,Time used %f s" % (precision, time_cost))
-
-if __name__ == "__main__":
-    #os.environ["CUDA_VISIBLE_DEVICES"] = "1,2,3"
-    tf.app.run(main=main)
-
-
-    #sess.close()
+    output.write("Test accuracy= %f ,Time used %f s" % (acc, time_used))
