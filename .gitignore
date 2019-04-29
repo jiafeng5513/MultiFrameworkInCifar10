@@ -518,3 +518,4 @@ fabric.properties
 *.txt
 *.onnx
 *.pth
+/Tensorflow/eval/
