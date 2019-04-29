@@ -10,9 +10,11 @@ from cntk.io import MinibatchSource, ImageDeserializer, StreamDef, StreamDefs
 from cntk.learners import momentum_sgd, learning_parameter_schedule, momentum_schedule,adam
 from cntk.debugging import *
 from cntk.logging import *
-from resnet_models import *
-import cntk.io.transforms as xforms
 
+import cntk.io.transforms as xforms
+from cntk.initializer import he_normal, normal
+from cntk.layers import AveragePooling, MaxPooling, BatchNormalization, Convolution, Dense
+from cntk.ops import element_times, relu
 # Paths relative to current python file.
 abs_path = os.path.dirname(os.path.abspath(__file__))
 data_path = os.path.join(abs_path, "..", "CIFAR-10")
@@ -24,6 +26,8 @@ num_channels = 3  # RGB
 num_classes = 10
 
 
+
+
 # Define the reader for both training and evaluation action.
 def create_image_mb_source(map_file, mean_file, train, total_number_of_samples):
     if not os.path.exists(map_file) or not os.path.exists(mean_file):
@@ -33,10 +37,10 @@ def create_image_mb_source(map_file, mean_file, train, total_number_of_samples):
 
     # transformation pipeline for the features has jitter/crop only when training
     transforms = []
-    if train:
-        transforms += [
-            xforms.crop(crop_type='randomside', side_ratio=(0.8, 1.0), jitter_type='uniratio')  # train uses jitter
-        ]
+    # if train:
+        # transforms += [
+        #     xforms.crop(crop_type='randomside', side_ratio=(0.8, 1.0), jitter_type='uniratio')  # train uses jitter
+        # ]
     transforms += [
         xforms.scale(width=image_width, height=image_height, channels=num_channels, interpolations='linear'),
         xforms.mean(mean_file)
@@ -49,6 +53,58 @@ def create_image_mb_source(map_file, mean_file, train, total_number_of_samples):
                            max_samples=total_number_of_samples,
                            multithreaded_deserializer=True)
 
+
+#
+# assembly components
+#
+def conv_bn(input, filter_size, num_filters, strides=(1, 1), init=he_normal(), bn_init_scale=1):
+    c = Convolution(filter_size, num_filters, activation=None, init=init, pad=True, strides=strides, bias=False)(input)
+    r = BatchNormalization(map_rank=1, normalization_time_constant=4096, use_cntk_engine=False, init_scale=bn_init_scale, disable_regularization=True)(c)
+    return r
+
+def conv_bn_relu(input, filter_size, num_filters, strides=(1, 1), init=he_normal()):
+    r = conv_bn(input, filter_size, num_filters, strides, init, 1)
+    return relu(r)
+
+#
+# ResNet components
+#
+def resnet_basic(input, num_filters):
+    c1 = conv_bn_relu(input, (3, 3), num_filters)
+    c2 = conv_bn(c1, (3, 3), num_filters, bn_init_scale=1)
+    p = c2 + input
+    return relu(p)
+
+def resnet_basic_inc(input, num_filters, strides=(2, 2)):
+    c1 = conv_bn_relu(input, (3, 3), num_filters, strides)
+    c2 = conv_bn(c1, (3, 3), num_filters, bn_init_scale=1)
+    s = conv_bn(input, (1, 1), num_filters, strides) # Shortcut
+    p = c2 + s
+    return relu(p)
+
+def resnet_basic_stack(input, num_stack_layers, num_filters):
+    assert(num_stack_layers >= 0)
+    l = input
+    for _ in range(num_stack_layers):
+        l = resnet_basic(l, num_filters)
+    return l
+
+def create_cifar10_model(input, num_stack_layers, num_classes):
+    c_map = [16, 32, 64]
+
+    conv = conv_bn_relu(input, (3, 3), c_map[0])
+    r1 = resnet_basic_stack(conv, num_stack_layers, c_map[0])
+
+    r2_1 = resnet_basic_inc(r1, c_map[1])
+    r2_2 = resnet_basic_stack(r2_1, num_stack_layers-1, c_map[1])
+
+    r3_1 = resnet_basic_inc(r2_2, c_map[2])
+    r3_2 = resnet_basic_stack(r3_1, num_stack_layers-1, c_map[2])
+
+    # Global average pooling and output
+    pool = AveragePooling(filter_shape=(8, 8), name='final_avg_pooling')(r3_2)
+    z = Dense(num_classes, init=normal(0.01))(pool)
+    return z
 
 # Train and evaluate the network.
 def train_and_evaluate(reader_train, reader_test, network_name, epoch_size, max_epochs, minibatch_size,

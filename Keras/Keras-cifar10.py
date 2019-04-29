@@ -41,13 +41,15 @@ x_test = x_test.astype('float32') / 255
 # If subtract pixel mean is enabled
 if subtract_pixel_mean:
     x_train_mean = np.mean(x_train, axis=0)
+    x_test_mean = np.mean(x_test, axis=0)
     x_train -= x_train_mean
-    x_test -= x_train_mean
+    x_test -= x_test_mean
 
 print('x_train shape:', x_train.shape)
 print(x_train.shape[0], 'train samples')
-print(x_test.shape[0], 'test samples')
 print('y_train shape:', y_train.shape)
+print(x_test.shape[0], 'test samples')
+
 
 # Convert class vectors to binary class matrices.
 y_train = keras.utils.to_categorical(y_train, num_classes)
@@ -115,9 +117,7 @@ def resnet_v1(input_shape, num_classes=10):
 
     x = AveragePooling2D(pool_size=8)(rb9)
     y = Flatten()(x)
-    outputs = Dense(num_classes,
-                    activation='softmax',
-                    kernel_initializer='he_normal')(y)
+    outputs = Dense(num_classes, activation='softmax',kernel_initializer='he_normal')(y)
 
     # Instantiate model.
     model = Model(inputs=input, outputs=outputs)
