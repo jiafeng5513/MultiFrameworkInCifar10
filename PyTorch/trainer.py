@@ -88,8 +88,6 @@ def main():
 
     train_loader = torch.utils.data.DataLoader(
         datasets.CIFAR10(root='../CIFAR-10/', train=True, transform=transforms.Compose([
-            transforms.RandomHorizontalFlip(),
-            transforms.RandomCrop(32, 4),
             transforms.ToTensor(),
             normalize,
         ]), download=True),
