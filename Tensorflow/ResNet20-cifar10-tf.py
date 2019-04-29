@@ -29,7 +29,7 @@ NUM_EXAMPLES_PER_EPOCH_FOR_EVAL = cifar10_input.NUM_EXAMPLES_PER_EPOCH_FOR_EVAL
 # 一个epoch有多少个batch
 NUM_BATCHES_PRE_RPOCH_FOE_TRAIN = (int)(NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN/batch_size)
 # 一共训练多少个Epoch
-MAX_EPOCH = 200
+MAX_EPOCH = 3
 # 训练次数控制,一个step是一个batch
 max_steps = NUM_BATCHES_PRE_RPOCH_FOE_TRAIN*MAX_EPOCH
 # The decay to use for the moving average.
@@ -141,61 +141,53 @@ def _add_loss_summaries(total_loss):
 
   return loss_averages_op
 
-def resV1(input,k,name):
+def resV1(input,k,name,is_training=True):
     with tf.variable_scope(name) as scope:
         kernel_1 = _variable_with_weight_decay('weights_1',
                                                shape=[3, 3, (int)(input.get_shape()[-1]), k],
                                                stddev=5e-2,
                                                wd=0.0)
         conv_1 = tf.nn.conv2d(input, kernel_1, [1, 1, 1, 1], padding='SAME')
-        re = tf.nn.relu(conv_1, name=scope.name+'-1')
+        bn1=tf.layers.batch_normalization(conv_1, training=is_training, name=scope.name+'-bn1')
+        re = tf.nn.relu(bn1, name=scope.name+'-1')
         kernel_2 = _variable_with_weight_decay('weights_2',
                                                shape=[3, 3, (int)(input.get_shape()[-1]), k],
                                                stddev=5e-2,
                                                wd=0.0)
         conv_2 = tf.nn.conv2d(re, kernel_2, [1, 1, 1, 1], padding='SAME')
-        res1 = tf.nn.relu(tf.add_n([input, conv_2]), name=scope.name+'-2')
+        bn2=tf.layers.batch_normalization(conv_2, training=is_training, name=scope.name+'-bn2')
+        res1 = tf.nn.relu(tf.add_n([input, bn2]), name=scope.name+'-2')
         _activation_summary(res1)
         return res1
 
-def resV2(input,k,name):
+def resV2(input,k,name,is_training=True):
     with tf.variable_scope(name) as scope:
         kernel_1 = _variable_with_weight_decay('weights_1',
                                                shape=[3, 3, (int)(input.get_shape()[-1]), k],
                                                stddev=5e-2,
                                                wd=0.0)
         conv_1 = tf.nn.conv2d(input, kernel_1, [1, 2, 2, 1], padding='SAME')
-        re = tf.nn.relu(conv_1, name=scope.name+'-1')
+        bn1 = tf.layers.batch_normalization(conv_1, training=is_training, name=scope.name + '-bn1')
+        re = tf.nn.relu(bn1, name=scope.name+'-1')
         kernel_2 = _variable_with_weight_decay('weights_2',
                                                shape=[3, 3, (int)(re.get_shape()[-1]), k],
                                                stddev=5e-2,
                                                wd=0.0)
         conv_2 = tf.nn.conv2d(re, kernel_2, [1, 1, 1, 1], padding='SAME')
+        bn2 = tf.layers.batch_normalization(conv_2, training=is_training, name=scope.name + '-bn2')
 
         kernel_3 = _variable_with_weight_decay('weights_3',
                                                shape=[1, 1, (int)(input.get_shape()[-1]), k],
                                                stddev=5e-2,
                                                wd=0.0)
         conv_3 = tf.nn.conv2d(input, kernel_3, [1, 2, 2, 1], padding='SAME')
+        bn3 = tf.layers.batch_normalization(conv_3, training=is_training, name=scope.name + '-bn3')
 
-        res1 = tf.nn.relu(tf.add_n([conv_3, conv_2]), name=scope.name+'-2')
+        res1 = tf.nn.relu(tf.add_n([bn3, bn2]), name=scope.name+'-2')
         _activation_summary(res1)
         return res1
 
-def inference_res20(images):
-  """Build the CIFAR-10 model.
-
-  Args:
-    images: Images returned from distorted_inputs() or inputs().
-
-  Returns:
-    Logits.
-  """
-  # We instantiate all variables using tf.get_variable() instead of
-  # tf.Variable() in order to share variables across multiple GPU training runs.
-  # If we only ran this model on a single GPU, we could simplify this function
-  # by replacing all instances of tf.get_variable() with tf.Variable().
-  #
+def inference_res20(images,is_training=True):
   # conv1
   with tf.variable_scope('conv1') as scope:
     kernel = _variable_with_weight_decay('weights',
@@ -203,23 +195,22 @@ def inference_res20(images):
                                          stddev=5e-2,
                                          wd=0.0)
     conv = tf.nn.conv2d(images, kernel, [1, 1, 1, 1], padding='SAME')
-    biases = _variable_on_cpu('biases', [16], tf.constant_initializer(0.0))
-    pre_activation = tf.nn.bias_add(conv, biases)
-    conv1 = tf.nn.relu(pre_activation, name=scope.name)
+    bn1 = tf.layers.batch_normalization(conv, training=is_training, name=scope.name + '-bn1')
+    conv1 = tf.nn.relu(bn1, name=scope.name)
     _activation_summary(conv1)
 
   # res
-  res1 = resV1(conv1, 16, "res1")
-  res2 = resV1(res1, 16, "res2")
-  res3 = resV1(res2, 16, "res3")
+  res1 = resV1(conv1, 16, "res1",is_training)
+  res2 = resV1(res1, 16, "res2",is_training)
+  res3 = resV1(res2, 16, "res3",is_training)
 
-  res4 = resV2(res3, 32, "res4")
-  res5 = resV1(res4, 32, "res5")
-  res6 = resV1(res5, 32, "res6")
+  res4 = resV2(res3, 32, "res4",is_training)
+  res5 = resV1(res4, 32, "res5",is_training)
+  res6 = resV1(res5, 32, "res6",is_training)
 
-  res7 = resV2(res6, 64, "res7")
-  res8 = resV1(res7, 64, "res8")
-  res9 = resV1(res8, 64, "res9")
+  res7 = resV2(res6, 64, "res7",is_training)
+  res8 = resV1(res7, 64, "res8",is_training)
+  res9 = resV1(res8, 64, "res9",is_training)
 
 
   with tf.variable_scope('softmax_linear') as scope:
@@ -298,29 +289,6 @@ def loss_res20(logits, labels):
   return tf.add_n(tf.get_collection('losses'), name='total_loss')
 
 def getTrainOp(total_loss, global_step):
-  """Train CIFAR-10 model.
-
-  Create an optimizer and apply to all trainable variables. Add moving
-  average for all trainable variables.
-
-  Args:
-    total_loss: Total loss from loss().
-    global_step: Integer Variable counting the number of training steps
-      processed.
-  Returns:
-    train_op: op for training.
-  """
-  # Variables that affect learning rate.
-  # num_batches_per_epoch = NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN / batch_size
-  # decay_steps = int(num_batches_per_epoch * NUM_EPOCHS_PER_DECAY)
-  #
-  # # Decay the learning rate exponentially based on the number of steps.
-  # lr = tf.train.exponential_decay(INITIAL_LEARNING_RATE,
-  #                                 global_step,
-  #                                 decay_steps,
-  #                                 LEARNING_RATE_DECAY_FACTOR,
-  #                                 staircase=True)
-
   boundaries = [item * NUM_BATCHES_PRE_RPOCH_FOE_TRAIN for item in boundaries_epoch]
   learning_rate = tf.train.piecewise_constant(x=global_step, boundaries=boundaries, values=learing_rates)
   tf.summary.scalar('learning_rate', learning_rate)
@@ -350,9 +318,10 @@ def getTrainOp(total_loss, global_step):
       MOVING_AVERAGE_DECAY, global_step)
   variables_averages_op = variable_averages.apply(tf.trainable_variables())
 
+  update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
   with tf.control_dependencies([apply_gradient_op, variables_averages_op]):
     train_op = tf.no_op(name='train')
-
+    train_op = tf.group([train_op, update_ops])
   return train_op
 
 def train():
@@ -366,15 +335,13 @@ def train():
     with tf.device('/cpu:0'):
       images, labels = distorted_inputs()
 
-    # Build a Graph that computes the logits predictions from the
-    # inference model.
-    logits = inference_res20(images)
+    # Build a Graph that computes the logits predictions from the inference model.
+    logits = inference_res20(images,is_training=True)
 
     # Calculate loss.
     loss = loss_res20(logits, labels)
 
-    # Build a Graph that trains the model with one batch of examples and
-    # updates the model parameters.
+    # Build a Graph that trains the model with one batch of examples and updates the model parameters.
     train_op = getTrainOp(loss, global_step)
 
     class _LoggerHook(tf.train.SessionRunHook):
@@ -479,7 +446,7 @@ def evaluate():
 
     # Build a Graph that computes the logits predictions from the
     # inference model.
-    logits = inference_res20(images)
+    logits = inference_res20(images,is_training=False)
 
     # Calculate predictions.
     top_k_op = tf.nn.in_top_k(logits, labels, 1)
