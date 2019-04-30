@@ -127,40 +127,19 @@ def train_and_evaluate(reader_train, reader_test, network_name, epoch_size, max_
     input_var = C.input_variable((num_channels, image_height, image_width), name='features')
     label_var = C.input_variable((num_classes))
 
-    dtype = np.float16 if fp16 else np.float32
-    if fp16:
-        graph_input = C.cast(input_var, dtype=np.float16)
-        graph_label = C.cast(label_var, dtype=np.float16)
-    else:
-        graph_input = input_var
-        graph_label = label_var
-
-    with C.default_options(dtype=dtype):
+    with C.default_options(dtype=np.float32):
         # create model, and configure learning parameters
-        if network_name == 'resnet20':
-            z = create_cifar10_model(graph_input, 3, num_classes)
-            lr_per_mb = [1.0] * 80 + [0.1] * 40 + [0.01]
-        elif network_name == 'resnet110':
-            z = create_cifar10_model(graph_input, 18, num_classes)
-            lr_per_mb = [0.1] * 1 + [1.0] * 80 + [0.1] * 40 + [0.01]
-        else:
-            raise RuntimeError("Unknown model name!")
-
+        model = create_cifar10_model(input_var, 3, num_classes)
         # loss and metric
-        ce = cross_entropy_with_softmax(z, graph_label)
-        pe = classification_error(z, graph_label)
+        loss = cross_entropy_with_softmax(model, label_var)
+        error_rate = classification_error(model, label_var)
 
-    if fp16:
-        ce = C.cast(ce, dtype=np.float32)
-        pe = C.cast(pe, dtype=np.float32)
 
     # shared training parameters
-
 
     # Set learning parameters
     lr_per_sample = []
     check_point=[80,120,160,180]
-    #check_point = [5, 10, 15, 20]
     lrs=[3e-2,3e-3,3e-4,3e-4,5e-5]
     for i in range(max_epochs+1):
         if i in range(0,check_point[0]):
@@ -179,16 +158,16 @@ def train_and_evaluate(reader_train, reader_test, network_name, epoch_size, max_
 
     # progress writers
     progress_writers = [
-        ProgressPrinter(tag='Training', log_to_file=log_dir, num_epochs=max_epochs, gen_heartbeat=gen_heartbeat)]
+        ProgressPrinter(tag='Training', num_epochs=max_epochs, gen_heartbeat=gen_heartbeat)]
     tensorboard_writer = None
     if tensorboard_logdir is not None:
-        tensorboard_writer = TensorBoardProgressWriter(freq=10, log_dir=tensorboard_logdir, model=z)
+        tensorboard_writer = TensorBoardProgressWriter(freq=10, log_dir=tensorboard_logdir, model=model)
         progress_writers.append(tensorboard_writer)
 
     # trainer object
     l2_reg_weight = 0.0001
-    learner = adam(z.parameters, lr_schedule, mm_schedule)
-    trainer = Trainer(z, (ce, pe), learner, progress_writers)
+    learner = adam(model.parameters, lr_schedule, mm_schedule)
+    trainer = Trainer(model, (loss, error_rate), learner, progress_writers)
 
     # define mapping from reader streams to network inputs
     input_map = {
@@ -196,7 +175,7 @@ def train_and_evaluate(reader_train, reader_test, network_name, epoch_size, max_
         label_var: reader_train.streams.labels
     }
 
-    log_number_of_parameters(z);
+    log_number_of_parameters(model);
     print("*********Training Start*********")
     start = time.clock()
     for epoch in range(max_epochs):  # loop over epochs
@@ -211,11 +190,11 @@ def train_and_evaluate(reader_train, reader_test, network_name, epoch_size, max_
 
         # Log mean of each parameter tensor, so that we can confirm that the parameters change indeed.
         if tensorboard_writer:
-            for parameter in z.parameters:
+            for parameter in model.parameters:
                 tensorboard_writer.write_value(parameter.uid + "/mean", reduce_mean(parameter).eval(), epoch)
 
         if model_dir:
-            z.save(os.path.join(model_dir, network_name + "_{}.dnn".format(epoch)))
+            model.save(os.path.join(model_dir, network_name + "_{}.dnn".format(epoch)))
         enable_profiler()  # begin to collect profiler data after first epoch
 
 

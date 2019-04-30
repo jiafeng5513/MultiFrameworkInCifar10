@@ -23,7 +23,7 @@ iteration：1个iteration等于使用batchsize个样本训练一次
 batch_size = 32  # orig paper trained all networks with batch_size=128
 epochs = 200
 num_classes = 10
-subtract_pixel_mean = True
+subtract_pixel_mean = False
 # n = 3
 # version = 1
 # depth = n * 6 + 2
