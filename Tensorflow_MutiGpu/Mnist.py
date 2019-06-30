@@ -36,11 +36,12 @@ FLAGS = tf.app.flags.FLAGS
 tf.app.flags.DEFINE_integer('batch_size', 64,"""Number of images to process in a batch.""")
 tf.app.flags.DEFINE_string('data_dir', './MNIST_data/prepared/',"""Path to the MNIST data directory.""")
 tf.app.flags.DEFINE_string('train_dir', './MNIST_train',"""Directory where to write event logs and checkpoint.""")
-tf.app.flags.DEFINE_integer('num_gpus', 1, """How many GPUs to use.""")
+tf.app.flags.DEFINE_integer('num_gpus', 4, """How many GPUs to use.""")
 tf.app.flags.DEFINE_boolean('log_device_placement', False, """Whether to log device placement.""")
 tf.app.flags.DEFINE_boolean('tb_logging', False,"""Whether to log to Tensorboard.""")
 tf.app.flags.DEFINE_integer('num_epochs', 10, """Number of epochs to run trainer.""")
 
+# 读取
 def read_and_decode(filename_queue):
     reader = tf.TFRecordReader()
     _, serialized_example = reader.read(filename_queue)
@@ -93,8 +94,7 @@ def inputs(train, batch_size, num_epochs):
                             TRAIN_FILE if train else VALIDATION_FILE)
 
     with tf.name_scope('input'):
-        filename_queue = tf.train.string_input_producer(
-            [filename], num_epochs=num_epochs)
+        filename_queue = tf.train.string_input_producer([filename], num_epochs=num_epochs)
 
         # Even when reading in multiple threads, share the filename
         # queue.
@@ -119,11 +119,8 @@ def inference(images):
     Returns:
       Logits.
     """
-    # We instantiate all variables using tf.get_variable() instead of
-    # tf.Variable() in order to share variables across multiple GPU training
-    # runs. If we only ran this model on a single GPU, we could simplify this
-    # function by replacing all instances of tf.get_variable()
-    # with tf.Variable().
+    # 使用 tf.get_variable()实例化所有变量,以便于在多GPU环境下共享
+
 
     # Reshape to use within a convolutional neural net.
     # Last dimension is for "features" - there is only one here, since images
@@ -132,31 +129,22 @@ def inference(images):
 
     # conv1
     with tf.variable_scope('conv1') as scope:
-        kernel = _variable_with_weight_decay('weights',
-                                             shape=[5, 5, 1, 32],
-                                             stddev=5e-2,
-                                             wd=0.0)
+        kernel = _variable_with_weight_decay('weights', shape=[5, 5, 1, 32], stddev=5e-2, wd=0.0)
         biases = _variable_on_cpu('biases', [32], tf.constant_initializer(0.0))
-        conv = tf.nn.conv2d(x_image, kernel, strides=[1, 1, 1, 1],
-                            padding='SAME')
+        conv = tf.nn.conv2d(x_image, kernel, strides=[1, 1, 1, 1], padding='SAME')
         pre_activation = tf.nn.bias_add(conv, biases)
         conv1 = tf.nn.relu(pre_activation, name=scope.name)
         _activation_summary(conv1)
 
     # pool1
-    pool1 = tf.nn.max_pool(conv1, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1],
-                           padding='SAME', name='pool1')
+    pool1 = tf.nn.max_pool(conv1, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='SAME', name='pool1')
 
     # norm1
-    norm1 = tf.nn.lrn(pool1, 4, bias=1.0, alpha=0.001 / 9.0, beta=0.75,
-                      name='norm1')
+    norm1 = tf.nn.lrn(pool1, 4, bias=1.0, alpha=0.001 / 9.0, beta=0.75, name='norm1')
 
     # conv2
     with tf.variable_scope('conv2') as scope:
-        kernel = _variable_with_weight_decay('weights',
-                                             shape=[5, 5, 32, 64],
-                                             stddev=5e-2,
-                                             wd=0.0)
+        kernel = _variable_with_weight_decay('weights', shape=[5, 5, 32, 64], stddev=5e-2, wd=0.0)
         conv = tf.nn.conv2d(norm1, kernel, strides=[1, 1, 1, 1], padding='SAME')
         biases = _variable_on_cpu('biases', [64], tf.constant_initializer(0.1))
         pre_activation = tf.nn.bias_add(conv, biases)
@@ -164,33 +152,26 @@ def inference(images):
         _activation_summary(conv2)
 
     # norm2
-    norm2 = tf.nn.lrn(conv2, 4, bias=1.0, alpha=0.001 / 9.0, beta=0.75,
-                      name='norm1')
+    norm2 = tf.nn.lrn(conv2, 4, bias=1.0, alpha=0.001 / 9.0, beta=0.75, name='norm1')
 
     # pool2
-    pool2 = tf.nn.max_pool(norm2, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1],
-                           padding='SAME', name='pool2')
+    pool2 = tf.nn.max_pool(norm2, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='SAME', name='pool2')
 
     # local3
     with tf.variable_scope('local3') as scope:
         # Move everything into depth so we can perform a single matrix multiply.
         reshape = tf.reshape(pool2, [-1, 7 * 7 * 64])
         dim = reshape.get_shape()[1].value
-        weights = _variable_with_weight_decay('weights', shape=[dim, 1024],
-                                              stddev=0.04, wd=0.004)
-        biases = _variable_on_cpu('biases', [1024],
-                                  tf.constant_initializer(0.1))
-        local3 = tf.nn.relu(tf.matmul(reshape, weights) + biases,
-                            name=scope.name)
+        weights = _variable_with_weight_decay('weights', shape=[dim, 1024], stddev=0.04, wd=0.004)
+        biases = _variable_on_cpu('biases', [1024], tf.constant_initializer(0.1))
+        local3 = tf.nn.relu(tf.matmul(reshape, weights) + biases, name=scope.name)
         _activation_summary(local3)
 
     # local4
     with tf.variable_scope('local4') as scope:
-        weights = _variable_with_weight_decay('weights', shape=[1024, 10],
-                                              stddev=0.04, wd=0.004)
+        weights = _variable_with_weight_decay('weights', shape=[1024, 10], stddev=0.04, wd=0.004)
         biases = _variable_on_cpu('biases', [10], tf.constant_initializer(0.1))
-        local4 = tf.nn.relu(tf.matmul(local3, weights) + biases,
-                            name=scope.name)
+        local4 = tf.nn.relu(tf.matmul(local3, weights) + biases, name=scope.name)
         _activation_summary(local4)
 
     # linear layer(WX + b),
@@ -198,35 +179,26 @@ def inference(images):
     # tf.nn.sparse_softmax_cross_entropy_with_logits accepts the unscaled logits
     # and performs the softmax internally for efficiency.
     with tf.variable_scope('softmax_linear') as scope:
-        weights = _variable_with_weight_decay('weights', [10, 10],
-                                              stddev=1 / 192.0, wd=0.0)
-        biases = _variable_on_cpu('biases', [10],
-                                  tf.constant_initializer(0.0))
-        softmax_linear = tf.add(tf.matmul(local4, weights), biases,
-                                name=scope.name)
+        weights = _variable_with_weight_decay('weights', [10, 10],  stddev=1 / 192.0, wd=0.0)
+        biases = _variable_on_cpu('biases', [10],  tf.constant_initializer(0.0))
+        softmax_linear = tf.add(tf.matmul(local4, weights), biases, name=scope.name)
         _activation_summary(softmax_linear)
 
     return softmax_linear
 
 
 def _variable_with_weight_decay(name, shape, stddev, wd):
-    """Helper to create an initialized Variable with weight decay.
-    Note that the Variable is initialized with a truncated normal distribution.
-    A weight decay is added only if one is specified.
+    """创建一个带有权重衰减的初始化变量。注意变量是用截断的正态分布初始化的。 仅在指定了权重衰减时才添加权重衰减。
     Args:
-      name: name of the variable
-      shape: list of ints
-      stddev: standard deviation of a truncated Gaussian
-      wd: add L2Loss weight decay multiplied by this float. If None, weight
-          decay is not added for this Variable.
+      name:   变量名
+      shape:  变量shape, list of ints
+      stddev: 截断高斯分布的标准差
+      wd:     添加L2Loss权重衰减,乘以此浮点数.如果为None,则不为此变量添加权重衰减.
     Returns:
       Variable Tensor
     """
     dtype = tf.float32
-    var = _variable_on_cpu(
-        name,
-        shape,
-        tf.truncated_normal_initializer(stddev=stddev, dtype=dtype))
+    var = _variable_on_cpu(name, shape, tf.truncated_normal_initializer(stddev=stddev, dtype=dtype))
     if wd is not None:
         weight_decay = tf.multiply(tf.nn.l2_loss(var), wd, name='weight_loss')
         tf.add_to_collection('losses', weight_decay)
@@ -234,11 +206,11 @@ def _variable_with_weight_decay(name, shape, stddev, wd):
 
 
 def _variable_on_cpu(name, shape, initializer):
-    """Helper to create a Variable stored on CPU memory.
+    """创建在主存(CPU内存)中存储的变量.
     Args:
-      name: name of the variable
+      name: 变量名
       shape: list of ints
-      initializer: initializer for Variable
+      initializer: 初始化器
     Returns:
       Variable Tensor
     """
@@ -267,23 +239,21 @@ def _activation_summary(x):
 
 
 def loss(logits, labels):
-    """Add L2Loss to all the trainable variables.
-
-    Add summary for "Loss" and "Loss/avg".
+    """
+    给所有可训练变量添加L2损失,给"Loss" and "Loss/avg"添加summary
     Args:
       logits: Logits from inference().
       labels: Labels from distorted_inputs or inputs(). 1-D tensor
               of shape [batch_size]
-
     Returns:
       Loss tensor of type float.
     """
-    # Calculate the average cross entropy loss across the batch.
+    # 计算batch的平均交叉熵损失
     labels = tf.cast(labels, tf.int64)
-    cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
-        labels=labels, logits=logits, name='cross_entropy_per_example')
+    cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=labels, logits=logits,
+                                                                   name='cross_entropy_per_example')
     cross_entropy_mean = tf.reduce_mean(cross_entropy, name='cross_entropy')
-    tf.add_to_collection('losses', cross_entropy_mean)
+    tf.add_to_collection('losses', cross_entropy_mean)  # 交叉熵损失
 
     # The total loss is defined as the cross entropy loss plus all of the weight
     # decay terms (L2 loss).
@@ -291,26 +261,24 @@ def loss(logits, labels):
 
 
 def tower_loss(scope):
-    """Calculate the total loss on a single tower running the MNIST model.
+    """计算单卡上的损失值
     Args:
-      scope: unique prefix string identifying the MNIST tower, e.g. 'tower_0'
+      scope: 指定显卡的唯一标识前缀, e.g. 'tower_0'
     Returns:
        Tensor of shape [] containing the total loss for a batch of data
     """
-    # Input images and labels.
-    images, labels = inputs(train=True, batch_size=FLAGS.batch_size,
-                            num_epochs=FLAGS.num_epochs)
-    # Build inference Graph.
+    # 输入图像和标签
+    images, labels = inputs(train=True, batch_size=FLAGS.batch_size, num_epochs=FLAGS.num_epochs)
+    # 过网络
     logits = inference(images)
 
-    # Build the portion of the Graph calculating the losses. Note that we will
-    # assemble the total_loss using a custom function below.
+    # 损失计算
     _ = loss(logits, labels)
 
-    # Assemble all of the losses for the current tower only.
+    # 收集当前显卡的损失
     losses = tf.get_collection('losses', scope)
 
-    # Calculate the total loss for the current tower.
+    # 计算当前显卡的总损失
     total_loss = tf.add_n(losses, name='total_loss')
 
     # Attach a scalar summary to all individual losses and the total loss; do
@@ -327,8 +295,7 @@ def tower_loss(scope):
 
 
 def average_gradients(tower_grads):
-    """Calculate average gradient for each shared variable across all towers.
-    Note that this function provides a synchronization point across all towers.
+    """计算在各个GPU中共享的变量的平均梯度,这是程序的同步点
     Args:
       tower_grads: List of lists of (gradient, variable) tuples. The outer list
         is over individual gradients. The inner list is over the gradient
@@ -364,57 +331,48 @@ def average_gradients(tower_grads):
 
 def train():
     with tf.Graph().as_default(), tf.device('/cpu:0'):
-        # Create a variable to count the number of train() calls. This equals
-        # the number of batches processed * FLAGS.num_gpus.
-        global_step = tf.get_variable(
-            'global_step', [],
-            initializer=tf.constant_initializer(0), trainable=False)
+        # 训练次数的计数变量,train()每被调用一次就+1,global_step = batches processed * FLAGS.num_gpus
+        global_step = tf.get_variable('global_step', [], initializer=tf.constant_initializer(0), trainable=False)
 
-        # Calculate the learning rate schedule.
-        num_batches_per_epoch = (NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN /
-                                 FLAGS.batch_size)
+        # 学习率
+        num_batches_per_epoch = (NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN / FLAGS.batch_size)
         decay_steps = int(num_batches_per_epoch * NUM_EPOCHS_PER_DECAY)
-
         # Decay the learning rate exponentially based on the number of steps.
         lr = tf.train.exponential_decay(INITIAL_LEARNING_RATE,
                                         global_step,
                                         decay_steps,
                                         LEARNING_RATE_DECAY_FACTOR,
                                         staircase=True)
-
+        # 使用动量优化器
         opt = tf.train.MomentumOptimizer(lr, 0.9, use_nesterov=True, use_locking=True)
 
-        # Calculate the gradients for each model tower.
+        # 每个GPU分别计算梯度
         tower_grads = []
         with tf.variable_scope(tf.get_variable_scope()):
             for i in range(FLAGS.num_gpus):
                 with tf.device('/gpu:%d' % i):
-                    with tf.name_scope(
-                                    '%s_%d' % (TOWER_NAME, i)) as scope:
+                    with tf.name_scope('%s_%d' % (TOWER_NAME, i)) as scope:
                         # Calculate the loss for one tower of the CIFAR model.
                         # This function constructs the entire CIFAR model but
                         # shares the variables across all towers.
-                        loss = tower_loss(scope)
+                        loss = tower_loss(scope)  # 计算损失,注意,数据的加载,预测值,损失计算都包含在其中
 
                         # Reuse variables for the next tower.
                         tf.get_variable_scope().reuse_variables()
 
                         # Retain the summaries from the final tower.
-                        summaries = tf.get_collection(tf.GraphKeys.SUMMARIES,
-                                                      scope)
+                        summaries = tf.get_collection(tf.GraphKeys.SUMMARIES, scope)
 
-                        # Calculate the gradients for the batch of data on this
-                        # MNIST tower.
+                        # 计算此批数据的梯度
                         grads = opt.compute_gradients(loss, gate_gradients=0)
 
-                        # Keep track of the gradients across all towers.
+                        # 跟踪所有卡的梯度。
                         tower_grads.append(grads)
 
-        # We must calculate the mean of each gradient. Note that this is the
-        # synchronization point across all towers.
+        # 所有卡梯度求均值
         grads = average_gradients(tower_grads)
 
-        # Add histograms for gradients.
+        # 梯度变化图
         if FLAGS.tb_logging:
             for grad, var in grads:
                 if grad is not None:
@@ -423,9 +381,10 @@ def train():
             # Add a summary to track the learning rate.
             summaries.append(tf.summary.scalar('learning_rate', lr))
 
+        # 应用梯度
         train_op = opt.apply_gradients(grads, global_step=global_step)
 
-        # Add histograms for trainable variables.
+        # 可训练变量的曲线图
         if FLAGS.tb_logging:
             for var in tf.trainable_variables():
                 summaries.append(tf.summary.histogram(var.op.name, var))
@@ -440,8 +399,7 @@ def train():
         # init = tf.global_variables_initializer()
 
         # The op for initializing the variables.
-        init_op = tf.group(tf.global_variables_initializer(),
-                           tf.local_variables_initializer())
+        init_op = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
 
         # Start running operations on the Graph. allow_soft_placement must be
         # set to True to build towers on GPU, as some of the ops do not have GPU
@@ -462,39 +420,28 @@ def train():
             while not coord.should_stop():
                 start_time = time.time()
 
-                # Run one step of the model.  The return values are
-                # the activations from the `train_op` (which is
-                # discarded) and the `loss` op.  To inspect the values
-                # of your ops or variables, you may include them in
-                # the list passed to sess.run() and the value tensors
-                # will be returned in the tuple from the call.
+                # 一步训练
                 _, loss_value = sess.run([train_op, loss])
-
+                # 计算用时
                 duration = time.time() - start_time
 
-                assert not np.isnan(
-                    loss_value), 'Model diverged with loss = NaN'
+                assert not np.isnan(loss_value), 'Model diverged with loss = NaN'
 
-                # Print an overview fairly often.
+                # 打印输出训练状态
                 if step % 100 == 0:
                     num_examples_per_step = FLAGS.batch_size * FLAGS.num_gpus
                     examples_per_sec = num_examples_per_step / duration
                     sec_per_batch = duration / FLAGS.num_gpus
-                    format_str = (
-                        '%s: step %d, loss = %.2f (%.1f examples/sec; %.3f '
-                        'sec/batch)')
-                    print(format_str % (datetime.now(), step, loss_value,
-                                        examples_per_sec, sec_per_batch))
+                    format_str = '%s: step %d, loss = %.2f (%.1f examples/sec; %.3f sec/batch)'
+                    print(format_str % (datetime.now(), step, loss_value, examples_per_sec, sec_per_batch))
                 if FLAGS.tb_logging:
                     if step % 10 == 0:
                         summary_str = sess.run(summary_op)
                         summary_writer.add_summary(summary_str, step)
 
-                # Save the model checkpoint periodically.
-                if step % 1000 == 0 or (
-                            step + 1) == FLAGS.num_epochs * FLAGS.batch_size:
-                    checkpoint_path = os.path.join(FLAGS.train_dir,
-                                                   'model.ckpt')
+                # 模型保存
+                if step % 1000 == 0 or (step + 1) == FLAGS.num_epochs * FLAGS.batch_size:
+                    checkpoint_path = os.path.join(FLAGS.train_dir, 'model.ckpt')
                     saver.save(sess, checkpoint_path, global_step=step)
 
                 step += 1
