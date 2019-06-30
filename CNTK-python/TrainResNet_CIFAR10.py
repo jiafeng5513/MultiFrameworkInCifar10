@@ -166,7 +166,7 @@ def train_and_evaluate(reader_train, reader_test, network_name, epoch_size, max_
 
     # trainer object
     l2_reg_weight = 0.0001
-    learner = adam(model.parameters, lr_schedule, mm_schedule)
+    learner = adam(model.parameters, lr_schedule, mm_schedule,l2_regularization_weight=l2_reg_weight)
     trainer = Trainer(model, (loss, error_rate), learner, progress_writers)
 
     # define mapping from reader streams to network inputs

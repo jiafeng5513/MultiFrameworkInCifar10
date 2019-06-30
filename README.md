@@ -35,11 +35,11 @@ batch_normalization在各个框架中的实现不完全相同,为了证明batch_
 6. 这些框架的安装都非常方便,对Linux和Windows的支持都很好.<br>
 
 #### E.参考和引用
-[1] Kaiming He, Xiangyu Zhang, Shaoqing Ren, Jian Sun. Deep Residual Learning for Image Recognition. arXiv:1512.03385
-[2] https://github.com/pytorch/vision/blob/master/torchvision/models/resnet.py
-[3] https://github.com/tensorflow/models/tree/master/tutorials/image/cifar10
-[4] https://github.com/Microsoft/CNTK/tree/master/Examples/Image/Classification/ResNet/Python
-[5] https://github.com/keras-team/keras/blob/master/examples/cifar10_resnet.py
+[1] Kaiming He, Xiangyu Zhang, Shaoqing Ren, Jian Sun. Deep Residual Learning for Image Recognition. arXiv:1512.03385<br>
+[2] https://github.com/pytorch/vision/blob/master/torchvision/models/resnet.py<br>
+[3] https://github.com/tensorflow/models/tree/master/tutorials/image/cifar10<br>
+[4] https://github.com/Microsoft/CNTK/tree/master/Examples/Image/Classification/ResNet/Python<br>
+[5] https://github.com/keras-team/keras/blob/master/examples/cifar10_resnet.py<br>
 
 #### F.说明
 实验数据仅供参考,请勿在您的出版物中使用.<br>

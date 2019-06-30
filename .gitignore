@@ -519,3 +519,13 @@ fabric.properties
 *.onnx
 *.pth
 /Tensorflow/eval/
+*.tar
+*.gz
+*.data-00000-of-00002
+*.data-00001-of-00002
+*.index
+*.meta
+
+Tensorflow_MutiGpu/MNIST_data/RAW
+Tensorflow_MutiGpu/MNIST_data/prepared
+Tensorflow_MutiGpu/MNIST_train
